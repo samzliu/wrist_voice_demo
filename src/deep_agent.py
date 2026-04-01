@@ -9,11 +9,10 @@ from pathlib import Path
 import anthropic
 
 SYSTEM_PROMPT = """\
-You are a spec-writing agent for OpenClaw onboarding. You can read, write, and \
-search files in the workspace directory. Your job is to help structure and refine \
-OpenClaw setup specs — agent definitions, team structures, workflow descriptions, \
-and Mermaid architecture diagrams. Complete the task and return a summary of what \
-you did."""
+You are a writing and editing assistant. You can read, write, and search markdown \
+files in the workspace directory. Your job is to help with any kind of document \
+work — writing, restructuring, expanding, condensing, or creating new files. \
+Complete the task and return a summary of what you did."""
 
 TOOLS = [
     {

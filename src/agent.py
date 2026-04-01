@@ -35,6 +35,7 @@ async def entrypoint(ctx: JobContext):
         turn_detection=MultilingualModel(unlikely_threshold=0.4),
     )
 
+    editor.set_room(ctx.room)
     await session.start(agent=editor, room=ctx.room)
 
 

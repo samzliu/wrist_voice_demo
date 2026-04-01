@@ -2,67 +2,53 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 from pathlib import Path
 
+from livekit import rtc
 from livekit.agents import function_tool, Agent, RunContext
 
 from . import markdown_ops
 from .deep_agent import run_deep_agent
 
+logger = logging.getLogger(__name__)
+
 
 SYSTEM_PROMPT = """\
-You are the OpenClaw Onboarding Agent — a conversational guide that helps users \
-design their ideal OpenClaw setup. Your job is to understand what the user wants \
-to accomplish, then collaboratively build a markdown spec document that captures \
-the full configuration: agents, roles, team structure, workflows, and integrations.
+You are a collaborative writing and editing assistant. You work alongside the user \
+in real time — they can see the document you're editing live on their screen. \
+Think of yourself as a coworker sitting next to them, talking through ideas and \
+making edits together.
 
-## How the conversation works
+## What you can do
+- Create, read, and edit markdown files in the workspace.
+- Help with any kind of writing: notes, blog posts, specs, plans, brainstorms, \
+documentation, outlines, meeting notes, lists — whatever the user needs.
+- Structure and reorganize content, fix prose, expand ideas, or trim things down.
 
-Phase 1 — Discovery (start here):
-- Ask about their use-case in plain language. What problems are they trying to solve? \
-What does their current workflow look like? What's painful about it?
-- Probe for specifics: How many people are involved? What tools do they already use? \
-What does success look like?
-- Keep questions conversational and one at a time. Don't overwhelm with a checklist.
-- Listen for signals about whether they need a single OpenClaw agent or a swarm/team \
-with distinct roles.
-
-Phase 2 — Spec drafting (transition when you have enough context):
-- Create a spec file (e.g. "openclaw-setup.md") and start populating it live as the \
-conversation progresses. Don't wait until the end — draft early and revise often.
-- The spec should include:
-  - **Overview**: One-paragraph summary of what the setup accomplishes.
-  - **Agents**: Each agent's name, role, capabilities, and the tools/APIs it accesses.
-  - **Team structure** (if multi-agent): How agents collaborate, who delegates to whom, \
-    what the communication flow looks like.
-  - **Architecture diagram**: A Mermaid diagram showing agents, their relationships, \
-    data flows, and external integrations.
-  - **Workflows**: Step-by-step descriptions of key workflows (e.g. "when a new ticket \
-    comes in, Agent A triages, Agent B researches, Agent C drafts a response").
-  - **Integrations**: External tools, APIs, data sources each agent connects to.
-  - **Guardrails**: Any constraints, approval gates, or human-in-the-loop checkpoints.
-- After each edit, briefly tell the user what you changed and ask if it matches their \
-  mental model.
-
-Phase 3 — Refinement (iterate until the user is satisfied):
-- Walk through the spec with the user. Ask if anything is missing or wrong.
-- Offer to adjust scope, add/remove agents, change workflows, etc.
-- When the user is happy, confirm the spec is ready to be used for setup.
+## How to work
+- Start by asking what the user wants to work on. Keep it casual and conversational.
+- When the user describes something, start editing right away. Don't wait for \
+perfect instructions — draft something and iterate. It's easier to react to \
+something concrete than to plan in the abstract.
+- After each edit, briefly say what you changed. The user can see the document \
+updating live, so keep explanations short.
+- If the user edits the document directly (you'll see their changes), acknowledge \
+and build on their work rather than overwriting it.
+- One question at a time. Let the user talk.
 
 ## Rules
 - Be concise and natural. Short sentences. No corporate jargon.
 - Do not use markdown formatting in your speech — speak naturally since the user \
 is interacting by voice.
-- One question at a time. Let the user talk.
-- Start editing the spec file as soon as you have enough context for an initial draft — \
-don't wait for the full picture. It's easier to react to something concrete.
-- When reading back spec content, summarize rather than reading verbatim. Only read \
+- When reading back content, summarize rather than reading verbatim. Only read \
 the full text if the user asks.
 - File paths are relative to the workspace directory. The user can refer to files \
 by name without the .md extension.
-- For complex multi-step tasks (restructuring the spec, generating detailed workflow \
-breakdowns, or creating multiple related files), use the deep_think tool to delegate \
-to a more capable agent.
+- For complex multi-step tasks (restructuring documents, batch edits, or creating \
+multiple related files), use the deep_think tool to delegate to a more capable agent.
 """
 
 
@@ -73,6 +59,45 @@ class MarkdownEditorAgent(Agent):
         )
         self._workspace = Path(workspace_dir).resolve()
         self._backups: dict[str, str] = {}  # path -> previous content
+        self._room: rtc.Room | None = None
+        self._current_file: str | None = None  # currently active file (relative)
+
+    def set_room(self, room: rtc.Room) -> None:
+        """Set the LiveKit room for data channel communication."""
+        self._room = room
+        room.on("data_received", self._on_data_received)
+
+    def _on_data_received(
+        self,
+        data: rtc.DataPacket,
+    ) -> None:
+        """Handle incoming data messages from the web client."""
+        try:
+            payload = data.data
+            msg = json.loads(payload.decode("utf-8"))
+            if msg.get("type") == "human_edit" and msg.get("content") is not None:
+                file_name = msg.get("file") or self._current_file
+                if file_name:
+                    path = self._resolve_path(file_name)
+                    self._backup_file(path)
+                    path.write_text(msg["content"], encoding="utf-8")
+                    logger.info("Received human edit for %s", file_name)
+        except Exception as e:
+            logger.warning("Error handling data message: %s", e)
+
+    async def _broadcast_doc(self, file_path: str, content: str) -> None:
+        """Send document content to connected web clients via data channel."""
+        if not self._room or not self._room.local_participant:
+            return
+        self._current_file = file_path
+        msg = json.dumps({"type": "doc_update", "file": file_path, "content": content})
+        try:
+            await self._room.local_participant.publish_data(
+                msg.encode("utf-8"),
+                reliable=True,
+            )
+        except Exception as e:
+            logger.warning("Failed to broadcast doc update: %s", e)
 
     def _resolve_path(self, file_path: str) -> Path:
         """Resolve a path relative to workspace, rejecting escapes."""
@@ -109,7 +134,9 @@ class MarkdownEditorAgent(Agent):
         path = self._resolve_path(file_path)
         if not path.exists():
             return f"File not found: {file_path}"
-        return path.read_text(encoding="utf-8")
+        content = path.read_text(encoding="utf-8")
+        await self._broadcast_doc(file_path, content)
+        return content
 
     @function_tool()
     async def read_section(self, context: RunContext, file_path: str, heading: str) -> str:
@@ -199,6 +226,7 @@ class MarkdownEditorAgent(Agent):
         self._backup_file(path)
         new = markdown_ops.replace_section_content(content, matches[0], new_content)
         path.write_text(new, encoding="utf-8")
+        await self._broadcast_doc(file_path, new)
         return f"Replaced section '{matches[0].heading}'. New content:\n{new_content}"
 
     @function_tool()
@@ -229,6 +257,7 @@ class MarkdownEditorAgent(Agent):
         if occurrence == 0:
             new = content.replace(find_text, replace_text)
             path.write_text(new, encoding="utf-8")
+            await self._broadcast_doc(file_path, new)
             return f"Replaced all {count} occurrences."
         else:
             # Replace the nth occurrence
@@ -241,6 +270,7 @@ class MarkdownEditorAgent(Agent):
                 + find_text.join(parts[occurrence:])
             )
             path.write_text(new, encoding="utf-8")
+            await self._broadcast_doc(file_path, new)
             return f"Replaced occurrence #{occurrence} of {count}."
 
     @function_tool()
@@ -270,6 +300,7 @@ class MarkdownEditorAgent(Agent):
         self._backup_file(path)
         new = markdown_ops.insert_after_line(content, found_line, new_text)
         path.write_text(new, encoding="utf-8")
+        await self._broadcast_doc(file_path, new)
         return f"Inserted text after line {found_line}."
 
     @function_tool()
@@ -297,6 +328,7 @@ class MarkdownEditorAgent(Agent):
         self._backup_file(path)
         new = markdown_ops.insert_after_line(file_content, section.end_line, content)
         path.write_text(new, encoding="utf-8")
+        await self._broadcast_doc(file_path, new)
         return f"Appended to section '{section.heading}'."
 
     @function_tool()
@@ -316,7 +348,9 @@ class MarkdownEditorAgent(Agent):
         existing = path.read_text(encoding="utf-8")
         if existing and not existing.endswith("\n"):
             existing += "\n"
-        path.write_text(existing + content + "\n", encoding="utf-8")
+        new = existing + content + "\n"
+        path.write_text(new, encoding="utf-8")
+        await self._broadcast_doc(file_path, new)
         return "Content appended to end of file."
 
     @function_tool()
@@ -343,6 +377,7 @@ class MarkdownEditorAgent(Agent):
         self._backup_file(path)
         new = markdown_ops.delete_line_range(file_content, section.start_line, section.end_line)
         path.write_text(new, encoding="utf-8")
+        await self._broadcast_doc(file_path, new)
         return f"Deleted section '{section.heading}' (lines {section.start_line}-{section.end_line})."
 
     @function_tool()
@@ -366,6 +401,7 @@ class MarkdownEditorAgent(Agent):
         self._backup_file(path)
         new = markdown_ops.delete_line_range(file_content, start_line, end_line)
         path.write_text(new, encoding="utf-8")
+        await self._broadcast_doc(file_path, new)
         return f"Deleted lines {start_line}-{end_line}."
 
     # ── File management tools ──────────────────────────────────────
@@ -385,6 +421,7 @@ class MarkdownEditorAgent(Agent):
             return f"File already exists: {file_path}"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+        await self._broadcast_doc(file_path, content)
         return f"Created {file_path}."
 
     @function_tool()

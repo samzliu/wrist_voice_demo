@@ -1,0 +1,29 @@
+{
+  "name": "wrist-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@livekit/components-react": "^2.9.0",
+    "@tiptap/extension-collaboration": "^2.11.0",
+    "@tiptap/extension-placeholder": "^2.11.0",
+    "@tiptap/pm": "^2.11.0",
+    "@tiptap/react": "^2.11.0",
+    "@tiptap/starter-kit": "^2.11.0",
+    "livekit-client": "^2.9.0",
+    "livekit-server-sdk": "^2.13.0",
+    "next": "^15.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}

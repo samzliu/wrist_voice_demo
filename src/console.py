@@ -34,7 +34,7 @@ def run_voice_console(
     c.enabled = True
 
     _configure_logger(c, log_level)
-    c.print("Starting voice console (push-to-talk)", tag="OpenClaw Onboarding")
+    c.print("Starting voice console (push-to-talk)", tag="Coworker")
 
     try:
         c._validate_device_or_raise(input_device=input_device, output_device=None)
