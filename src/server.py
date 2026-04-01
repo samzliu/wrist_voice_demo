@@ -30,18 +30,20 @@ async def api_token(request: Request) -> JSONResponse:
     room = request.query_params.get("room", "onboarding-room")
     identity = request.query_params.get("identity", "human")
 
-    token = AccessToken(
-        os.environ.get("LIVEKIT_API_KEY", ""),
-        os.environ.get("LIVEKIT_API_SECRET", ""),
+    token = (
+        AccessToken(
+            os.environ.get("LIVEKIT_API_KEY", ""),
+            os.environ.get("LIVEKIT_API_SECRET", ""),
+        )
+        .with_identity(identity)
+        .with_grants(VideoGrants(
+            room=room,
+            room_join=True,
+            can_publish=True,
+            can_subscribe=True,
+            can_publish_data=True,
+        ))
     )
-    token.identity = identity
-    token.add_grant(VideoGrants(
-        room=room,
-        room_join=True,
-        can_publish=True,
-        can_subscribe=True,
-        can_publish_data=True,
-    ))
 
     jwt = token.to_jwt()
     return JSONResponse({"token": jwt})
