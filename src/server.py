@@ -49,12 +49,19 @@ async def api_token(request: Request) -> JSONResponse:
     return JSONResponse({"token": jwt})
 
 
+def _ensure_deck() -> None:
+    """Create the intro deck if it doesn't exist."""
+    path = _deck_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(INTRO_DECK_HTML, encoding="utf-8")
+
+
 async def api_deck(request: Request) -> Response:
     path = _deck_path()
-    if path.exists():
-        html = path.read_text(encoding="utf-8")
-        return HTMLResponse(html)
-    return HTMLResponse("<!-- No deck found -->", status_code=404)
+    _ensure_deck()
+    html = path.read_text(encoding="utf-8")
+    return HTMLResponse(html)
 
 
 routes = [

@@ -12,6 +12,9 @@ if [ -d ".venv/bin" ]; then
     export PATH=".venv/bin:$PATH"
 fi
 
+# Download turn detector model files if not present
+python -m src.agent download-files 2>/dev/null || true
+
 # Start web server in background
 uvicorn src.server:app --host 0.0.0.0 --port "$PORT" &
 WEB_PID=$!
