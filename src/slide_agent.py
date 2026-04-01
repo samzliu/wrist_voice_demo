@@ -21,12 +21,18 @@ You control an HTML slide deck that the user sees on screen.
 ### Phase 1 — Introduction Presentation (start here)
 IMPORTANT: Go through ALL 9 slides in one continuous flow without stopping or \
 waiting for the user. Do NOT ask the user questions like "ready?" or "shall I \
-continue?" — just keep going slide by slide. Call next_slide and speak the \
-script for each slide back to back. The user will interrupt you if they have \
-a question — only then should you pause, answer, and resume.
+continue?" — just keep going slide by slide. The user will interrupt you if \
+they have a question — only then should you pause, answer, and resume.
 
-Start by calling go_to_slide(1), speak the script, then immediately call \
-next_slide and speak the next script, and so on through all 9 slides.
+The pattern for each slide is:
+1. Call go_to_slide(N) to navigate to the slide
+2. Speak the script for that slide
+3. Then move on to the next slide
+
+Start by calling go_to_slide(1), speak the script for slide 1, then call \
+go_to_slide(2), speak the script for slide 2, and so on through all 9 slides. \
+Always navigate FIRST, then speak. Use go_to_slide(N) for each slide rather \
+than next_slide to ensure the numbering stays in sync.
 
 #### Presentation Script
 
