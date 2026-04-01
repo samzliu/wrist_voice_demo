@@ -7,6 +7,8 @@ import sys
 
 from dotenv import load_dotenv
 from livekit.agents import AgentServer, AgentSession, JobContext, cli
+from livekit.agents.inference.tts import TTS, ElevenlabsOptions
+from livekit.plugins.anthropic import LLM
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from .editor_agent import MarkdownEditorAgent
@@ -23,8 +25,13 @@ async def entrypoint(ctx: JobContext):
     editor = MarkdownEditorAgent(workspace_dir=WORKSPACE_DIR)
 
     session = AgentSession(
-        stt="openai/whisper-1",
-        llm="anthropic/claude-haiku-4-5-20251001",
+        stt="deepgram/nova-3:en",
+        llm=LLM(model="claude-haiku-4-5-20251001"),
+        tts=TTS(
+            "elevenlabs/eleven_flash_v2_5",
+            voice="cgSgspJ2msm6clMCkdW9",  # Jessica
+            extra_kwargs=ElevenlabsOptions(speed=1.0),
+        ),
         turn_detection=MultilingualModel(unlikely_threshold=0.4),
     )
 

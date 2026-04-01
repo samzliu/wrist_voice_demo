@@ -67,14 +67,9 @@ def run_voice_console(
             c.wait_for_io_acquisition()
             session = c.io_session
 
-            # Disable audio output — we print text instead of speaking
-            def _disable_output() -> None:
-                session.output.audio = None
-
-            c.io_loop.call_soon_threadsafe(_disable_output)
-
-            # Enable microphone hardware
+            # Enable microphone and speaker hardware
             c.set_microphone_enabled(True, device=input_device)
+            c.set_speaker_enabled(True)
 
             # Start muted (push-to-talk default)
             c.io_loop.call_soon_threadsafe(session.input.set_audio_enabled, False)
@@ -89,12 +84,17 @@ def run_voice_console(
 
             def _listen_for_keys() -> None:
                 nonlocal mic_on
+                last_toggle_time = 0.0
                 while not exit_triggered:
                     try:
                         ch = readkey()
                     except KeyboardInterrupt:
                         return
-                    if ch == "\t":  # Tab toggles mic
+                    if ch == "\t":
+                        now = time.monotonic()
+                        if now - last_toggle_time < 0.5:
+                            continue  # suppress key-repeat from holding Tab
+                        last_toggle_time = now
                         mic_on = not mic_on
                         c.io_loop.call_soon_threadsafe(
                             session.input.set_audio_enabled, mic_on
@@ -112,6 +112,7 @@ def run_voice_console(
             pass
         finally:
             c.set_microphone_enabled(False)
+            c.set_speaker_enabled(False)
             worker.shutdown()
             worker.join()
 
