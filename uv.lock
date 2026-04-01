@@ -897,6 +897,9 @@ wheels = [
 ]
 
 [package.optional-dependencies]
+codecs = [
+    { name = "numpy" },
+]
 silero = [
     { name = "livekit-plugins-silero" },
 ]
@@ -964,6 +967,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/35/4c/9537e6ed3b701c9da374fa6af250299cb3384548e824b6de2bf458daa4a3/livekit_plugins_anthropic-1.5.0.tar.gz", hash = "sha256:d7fb6d98ea830fbec80fef43f9f180c58dffd41eea602e6619fac8cb13043e3e", size = 8944, upload-time = "2026-03-19T16:59:41.439Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/43/e42f549294cf96e59b04b5d47afb88d9fc184492eee7ab3bcb0f82e5b515/livekit_plugins_anthropic-1.5.0-py3-none-any.whl", hash = "sha256:470aeb1e7a77bb6d315b79c96fe50bc8fc5734ce2d664292b509f98e15c977ca", size = 10734, upload-time = "2026-03-19T16:59:40.357Z" },
+]
+
+[[package]]
+name = "livekit-plugins-deepgram"
+version = "1.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "livekit-agents", extra = ["codecs"] },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3e/76/604a856364c93d9a1b8121a28ff129d97707d650a3b7fbac6c48dee5de17/livekit_plugins_deepgram-1.5.0.tar.gz", hash = "sha256:5e6e9d2876c010e31bdf0b2a8c389dcd29a79bff266cd2e11f56acb17f8ec1af", size = 16872, upload-time = "2026-03-19T17:00:47.274Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/09/26/dbf9dae9fbc4c32e3617c7ba39a95e7e4985ba74dd7919d028009ef00ca7/livekit_plugins_deepgram-1.5.0-py3-none-any.whl", hash = "sha256:27ed8e0b492598a8a9c0ed07f133203ef2e184d9d63af45921b0cbbf96d6ff05", size = 21909, upload-time = "2026-03-19T17:00:46.045Z" },
 ]
 
 [[package]]
@@ -2274,6 +2290,7 @@ dependencies = [
     { name = "anthropic" },
     { name = "livekit-agents", extra = ["silero", "turn-detector"] },
     { name = "livekit-plugins-anthropic" },
+    { name = "livekit-plugins-deepgram" },
     { name = "livekit-plugins-noise-cancellation" },
     { name = "python-dotenv" },
 ]
@@ -2283,6 +2300,7 @@ requires-dist = [
     { name = "anthropic", specifier = ">=0.42" },
     { name = "livekit-agents", extras = ["silero", "turn-detector"], specifier = "~=1.4" },
     { name = "livekit-plugins-anthropic", specifier = ">=1.5" },
+    { name = "livekit-plugins-deepgram", specifier = ">=1.5.0" },
     { name = "livekit-plugins-noise-cancellation", specifier = ">=0.2" },
     { name = "python-dotenv" },
 ]

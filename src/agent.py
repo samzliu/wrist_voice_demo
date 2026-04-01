@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from livekit.agents import AgentServer, AgentSession, JobContext, cli
 from livekit.agents.inference.tts import TTS, ElevenlabsOptions
 from livekit.plugins.anthropic import LLM
+from livekit.plugins.deepgram import STTv2
+from livekit.plugins.silero import VAD
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from .editor_agent import MarkdownEditorAgent
@@ -25,7 +27,8 @@ async def entrypoint(ctx: JobContext):
     editor = MarkdownEditorAgent(workspace_dir=WORKSPACE_DIR)
 
     session = AgentSession(
-        stt="deepgram/nova-3:en",
+        vad=VAD.load(),
+        stt=STTv2(model="flux-general-en"),
         llm=LLM(model="claude-haiku-4-5-20251001"),
         tts=TTS(
             "elevenlabs/eleven_flash_v2_5",
@@ -33,10 +36,17 @@ async def entrypoint(ctx: JobContext):
             extra_kwargs=ElevenlabsOptions(speed=1.0),
         ),
         turn_detection=MultilingualModel(unlikely_threshold=0.4),
+        turn_handling={
+            "endpointing": {
+                "mode": "dynamic",
+                "min_delay": 0.2,
+                "max_delay": 10.0,
+            },
+        },
     )
 
     editor.set_room(ctx.room)
-    await session.start(agent=editor, room=ctx.room)
+    await session.start(agent=editor, room=ctx.room, record=True)
 
 
 if __name__ == "__main__":

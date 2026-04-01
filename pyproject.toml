@@ -8,4 +8,5 @@ dependencies = [
     "livekit-plugins-noise-cancellation>=0.2",
     "python-dotenv",
     "anthropic>=0.42",
+    "livekit-plugins-deepgram>=1.5.0",
 ]
