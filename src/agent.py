@@ -1,9 +1,10 @@
-"""Entry point for the Wrist voice-controlled markdown editor."""
+"""Entry point for the OpenClaw onboarding voice agent with slide presentation."""
 
 from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from dotenv import load_dotenv
 from livekit.agents import AgentServer, AgentSession, JobContext, cli
@@ -11,18 +12,31 @@ from livekit.agents.inference.tts import TTS, ElevenlabsOptions
 from livekit.plugins.anthropic import LLM
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
-from .editor_agent import MarkdownEditorAgent
+from .slide_agent import SlideAgent
+from .initial_deck import INTRO_DECK_HTML
 
 load_dotenv(".env.local")
 
-WORKSPACE_DIR = os.environ.get("WRIST_WORKSPACE_DIR", os.path.expanduser("~/markdown"))
+DECK_DIR = os.environ.get("WRIST_DECK_DIR", os.path.expanduser("~/slides"))
+DECK_FILE = "onboarding.html"
 
 server = AgentServer()
 
 
+def _ensure_deck() -> str:
+    """Create the deck file with intro slides if it doesn't exist. Returns the path."""
+    deck_dir = Path(DECK_DIR)
+    deck_dir.mkdir(parents=True, exist_ok=True)
+    deck_path = deck_dir / DECK_FILE
+    # Always reset to intro deck at the start of each session
+    deck_path.write_text(INTRO_DECK_HTML, encoding="utf-8")
+    return str(deck_path)
+
+
 @server.rtc_session()
 async def entrypoint(ctx: JobContext):
-    editor = MarkdownEditorAgent(workspace_dir=WORKSPACE_DIR)
+    deck_path = _ensure_deck()
+    agent = SlideAgent(deck_path=deck_path)
 
     session = AgentSession(
         stt="deepgram/nova-3:en",
@@ -35,7 +49,7 @@ async def entrypoint(ctx: JobContext):
         turn_detection=MultilingualModel(unlikely_threshold=0.4),
     )
 
-    await session.start(agent=editor, room=ctx.room)
+    await session.start(agent=agent, room=ctx.room)
 
 
 if __name__ == "__main__":

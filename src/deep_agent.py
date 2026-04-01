@@ -9,11 +9,16 @@ from pathlib import Path
 import anthropic
 
 SYSTEM_PROMPT = """\
-You are a spec-writing agent for OpenClaw onboarding. You can read, write, and \
-search files in the workspace directory. Your job is to help structure and refine \
-OpenClaw setup specs — agent definitions, team structures, workflow descriptions, \
-and Mermaid architecture diagrams. Complete the task and return a summary of what \
-you did."""
+You are a slide-building agent for OpenClaw onboarding. You can read, write, and \
+search files in the workspace directory. Your job is to create and edit HTML slides \
+for OpenClaw setup presentations — agent definitions, team structures, workflow \
+diagrams, and integration overviews.
+
+Slides use the format: <section class="slide" style="...">...</section> inside a \
+single HTML deck file. Use inline CSS only, Arial font, dark theme (#0f172a \
+background, #ffffff/#e2e8f0/#94a3b8 text, #3b82f6 accent). Each slide is 960x540px.
+
+Complete the task and return a summary of what you did."""
 
 TOOLS = [
     {
