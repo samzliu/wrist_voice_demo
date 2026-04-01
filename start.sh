@@ -12,14 +12,12 @@ if [ -d ".venv/bin" ]; then
     export PATH=".venv/bin:$PATH"
 fi
 
-# Download turn detector model files if not present
-python -m src.agent download-files 2>/dev/null || true
-
-# Start web server in background
+# Start web server FIRST so Render health check passes
 uvicorn src.server:app --host 0.0.0.0 --port "$PORT" &
 WEB_PID=$!
 
-# Start LiveKit agent
+# Download turn detector model, then start agent
+python -m src.agent download-files 2>/dev/null || true
 python -m src.agent start &
 AGENT_PID=$!
 
