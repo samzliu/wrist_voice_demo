@@ -4,6 +4,8 @@ WORKDIR /app/web
 COPY web/package.json web/package-lock.json* ./
 RUN npm ci
 COPY web/ ./
+ARG NEXT_PUBLIC_LIVEKIT_URL
+ENV NEXT_PUBLIC_LIVEKIT_URL=$NEXT_PUBLIC_LIVEKIT_URL
 RUN npm run build
 
 # Stage 2: Python runtime
