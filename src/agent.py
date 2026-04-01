@@ -17,7 +17,7 @@ from .initial_deck import INTRO_DECK_HTML
 
 load_dotenv(".env.local")
 
-DECK_DIR = os.environ.get("WRIST_DECK_DIR", os.path.expanduser("~/slides"))
+DECK_DIR = os.environ.get("WRIST_DECK_DIR", "/tmp/slides")
 DECK_FILE = "onboarding.html"
 
 server = AgentServer()
