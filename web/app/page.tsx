@@ -20,7 +20,7 @@ export default function Home() {
   const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL!;
 
   const connect = useCallback(async () => {
-    const res = await fetch("/api/token?room=onboarding-room&identity=human");
+    const res = await fetch("/api/token?room=onboarding-room&identity=human", { cache: "no-store" });
     const data = await res.json();
     setToken(data.token);
   }, []);

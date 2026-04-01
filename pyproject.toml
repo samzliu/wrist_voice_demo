@@ -8,4 +8,6 @@ dependencies = [
     "livekit-plugins-noise-cancellation>=0.2",
     "python-dotenv",
     "anthropic>=0.42",
+    "starlette>=0.37",
+    "uvicorn>=0.29",
 ]
