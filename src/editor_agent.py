@@ -51,8 +51,10 @@ is interacting by voice.
 the full text if the user asks.
 - For complex multi-step tasks, use the deep_think tool to delegate to a more \
 capable agent.
-- When you ask the user a question or present options, use yield_turn to wait \
-patiently for their response without any timeout pressure.
+- Use yield_turn when you expect the user to speak at length — telling a story, \
+dictating content, outlining multiple points, or thinking through something \
+complex with pauses. This prevents you from jumping in during their natural \
+pauses. Do NOT use it for quick back-and-forth exchanges.
 """
 
 
@@ -66,6 +68,8 @@ class MarkdownEditorAgent(Agent):
         self._backup: str | None = None  # single-level undo
         self._room: rtc.Room | None = None
         self._session: AgentSession | None = None
+        self._default_max_delay: float = 3.0
+        self._yield_active: bool = False
 
         # Ensure the file exists
         self._workspace.mkdir(parents=True, exist_ok=True)
@@ -75,6 +79,23 @@ class MarkdownEditorAgent(Agent):
     def set_session(self, session: AgentSession) -> None:
         """Set the agent session for yield_turn support."""
         self._session = session
+        # Reset max_delay after each committed user turn
+        session.on("user_state_changed", self._on_user_state_for_yield_reset)
+
+    def _on_user_state_for_yield_reset(self, ev: object) -> None:
+        """Reset max_delay after the user finishes speaking post-yield."""
+        if not self._yield_active:
+            return
+        new_state = getattr(ev, "new_state", None)
+        old_state = getattr(ev, "old_state", None)
+        # User started speaking → they're responding. Reset yield after they finish.
+        if old_state == "speaking" and new_state == "listening":
+            self._yield_active = False
+            if self._session is not None:
+                self._session.update_options(
+                    max_endpointing_delay=self._default_max_delay
+                )
+                logger.info("yield_turn reset: max_delay restored to %.1f", self._default_max_delay)
 
     def set_room(self, room: rtc.Room) -> None:
         """Set the LiveKit room for data channel communication."""
@@ -362,28 +383,35 @@ class MarkdownEditorAgent(Agent):
 
     @function_tool()
     async def yield_turn(self, context: RunContext, patience: float = 0) -> str:
-        """Control how patiently the system waits for the user to speak.
+        """Give the user extra time to speak without being interrupted.
+
+        Call this BEFORE the user starts their response when you expect them to:
+        - Tell a story or give a long explanation
+        - Monologue or dictate content at length
+        - Think through something complex with pauses between thoughts
+        - Outline multiple items or details
+        - Answer a question that requires reflection
+
+        Do NOT call this for quick back-and-forth exchanges. Only use it when
+        the user needs room to speak at length or think with pauses.
 
         Args:
-            patience: How patient to be. 0 = yield indefinitely (no timeout
-                at all, wait forever). 1-5 = multiply max_delay by this factor
-                (good after complex explanations).
-
-        Use patience=0 (the default) after asking a direct question or
-        presenting choices. Use patience=2-3 after giving a complex
-        explanation the user might need time to absorb.
+            patience: 0 = wait as long as needed (default, best for most cases).
+                1-3 = moderately more patient. Use when the user might pause
+                briefly but you still want normal turn-taking to resume soon.
         """
         if self._session is None:
             return "Session not available."
         try:
+            self._yield_active = True
             if patience == 0:
-                # Indefinite yield: set very high max_delay
                 self._session.update_options(max_endpointing_delay=300.0)
-                return "Yielded. Waiting indefinitely for user to speak."
+                return "Listening mode on. Will wait for the user to finish."
             else:
-                # Patience mode: multiply max_delay
-                self._session.update_options(max_endpointing_delay=3.0 * patience)
-                return f"Max delay set to {3.0 * patience:.1f}s."
+                self._session.update_options(
+                    max_endpointing_delay=self._default_max_delay * (1 + patience)
+                )
+                return f"Extra patience set. Will reset after user speaks."
         except Exception as e:
             logger.warning("yield_turn failed: %s", e)
             return f"Failed to adjust patience: {e}"
