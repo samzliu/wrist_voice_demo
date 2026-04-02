@@ -56,7 +56,9 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: "#666",
     background: "none",
-    border: "none",
+    borderTop: "none",
+    borderLeft: "none",
+    borderRight: "none",
     borderBottom: "2px solid transparent",
     cursor: "pointer",
     display: "flex",
@@ -66,7 +68,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   activeTab: {
     color: "#fafafa",
-    borderBottomColor: "#fafafa",
+    borderBottom: "2px solid #fafafa",
   },
   close: {
     fontSize: 14,

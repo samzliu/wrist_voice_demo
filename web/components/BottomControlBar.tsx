@@ -1,11 +1,47 @@
 "use client";
 
-import { TrackToggle } from "@livekit/components-react";
+import {
+  TrackToggle,
+  useLocalParticipant,
+  useParticipants,
+} from "@livekit/components-react";
 import { Track } from "livekit-client";
 import { useApp } from "./AppContext";
 
 export function BottomControlBar() {
   const { state, dispatch, sendMessage } = useApp();
+  const participants = useParticipants();
+  const { localParticipant } = useLocalParticipant();
+
+  const agentParticipant = participants.find(
+    (p) => p.identity !== localParticipant.identity,
+  );
+  const agentSpeaking = agentParticipant?.isSpeaking ?? false;
+  const userSpeaking = localParticipant.isSpeaking;
+  const micOn = localParticipant.isMicrophoneEnabled;
+
+  // Determine turn state
+  let turnLabel = "";
+  let turnColor = "#555";
+  if (state.agentPaused) {
+    turnLabel = "Paused";
+    turnColor = "#f87171";
+  } else if (state.agentState === "thinking") {
+    turnLabel = "Thinking...";
+    turnColor = "#f59e0b";
+  } else if (agentSpeaking) {
+    turnLabel = "Agent speaking";
+    turnColor = "#4ade80";
+  } else if (userSpeaking) {
+    turnLabel = "Listening...";
+    turnColor = "#60a5fa";
+  } else if (!agentParticipant) {
+    turnLabel = "Waiting for agent...";
+    turnColor = "#666";
+  } else {
+    turnLabel = "Waiting for you";
+    turnColor = "#888";
+  }
 
   const togglePause = () => {
     const next = !state.agentPaused;
@@ -21,7 +57,7 @@ export function BottomControlBar() {
 
   return (
     <div style={styles.bar}>
-      {/* Left: connection status */}
+      {/* Left: connection + turn indicator */}
       <div style={styles.left}>
         <span
           style={{
@@ -32,10 +68,28 @@ export function BottomControlBar() {
         <span style={styles.statusText}>
           {state.connected ? "Connected" : "Connecting..."}
         </span>
-        {state.agentState !== "active" && (
-          <span style={styles.agentStatus}>
-            {state.agentState === "paused" ? "Paused" : "Thinking..."}
-          </span>
+        <span style={styles.separator}>·</span>
+        <span
+          style={{
+            ...styles.turnIndicator,
+            background: turnColor + "22",
+            borderColor: turnColor + "44",
+            color: turnColor,
+          }}
+        >
+          <span
+            style={{
+              ...styles.turnDot,
+              background: turnColor,
+              ...(agentSpeaking || userSpeaking
+                ? { animation: "pulse 1s infinite" }
+                : {}),
+            }}
+          />
+          {turnLabel}
+        </span>
+        {!micOn && state.connected && (
+          <span style={styles.micOff}>Mic off</span>
         )}
       </div>
 
@@ -69,6 +123,14 @@ export function BottomControlBar() {
 
       {/* Right: spacer */}
       <div style={styles.right} />
+
+      {/* Inject keyframes for pulse animation */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -99,10 +161,30 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     color: "#888",
   },
-  agentStatus: {
+  separator: {
+    color: "#444",
+    fontSize: 14,
+  },
+  turnIndicator: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
     fontSize: 12,
-    color: "#f59e0b",
-    marginLeft: 8,
+    fontWeight: 500,
+    padding: "3px 10px",
+    borderRadius: 12,
+    border: "1px solid",
+  },
+  turnDot: {
+    width: 6,
+    height: 6,
+    borderRadius: "50%",
+    flexShrink: 0,
+  },
+  micOff: {
+    fontSize: 11,
+    color: "#f87171",
+    marginLeft: 4,
   },
   center: {
     display: "flex",

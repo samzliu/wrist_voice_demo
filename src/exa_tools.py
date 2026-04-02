@@ -26,7 +26,7 @@ def web_search(query: str, num_results: int = 5) -> list[dict]:
     """Search the web using Exa. Returns list of {title, url, snippet}."""
     try:
         client = _get_client()
-        results = client.search(query, num_results=num_results, use_autoprompt=True)
+        results = client.search(query, num_results=num_results)
         return [
             {
                 "title": r.title or "",
@@ -42,21 +42,20 @@ def web_search(query: str, num_results: int = 5) -> list[dict]:
 
 
 def deep_research(query: str, num_results: int = 10) -> list[dict]:
-    """Deep research using Exa with full content. Returns list of {title, url, snippet, content}."""
+    """Deep research using Exa with full content."""
     try:
         client = _get_client()
-        results = client.search_and_contents(
+        results = client.search(
             query,
             num_results=num_results,
-            text=True,
-            use_autoprompt=True,
+            contents={"text": {"max_characters": 5000}},
         )
         return [
             {
                 "title": r.title or "",
                 "url": r.url,
-                "snippet": (r.text or "")[:300],
-                "content": (r.text or "")[:5000],
+                "snippet": (getattr(r, "text", "") or "")[:300],
+                "content": (getattr(r, "text", "") or "")[:5000],
             }
             for r in results.results
         ]
