@@ -7,8 +7,10 @@ import sys
 
 from dotenv import load_dotenv
 from livekit.agents import AgentServer, AgentSession, JobContext, cli
+from livekit.agents.voice import room_io
 from livekit.agents.inference.tts import TTS, ElevenlabsOptions
 from livekit.plugins.anthropic import LLM
+from livekit.plugins.noise_cancellation import BVC
 from livekit.plugins.silero import VAD
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -51,7 +53,14 @@ async def entrypoint(ctx: JobContext):
 
     editor.set_room(ctx.room)
     editor.set_session(session)
-    await session.start(agent=editor, room=ctx.room, record=True)
+    await session.start(
+        agent=editor,
+        room=ctx.room,
+        record=True,
+        room_input_options=room_io.RoomInputOptions(
+            noise_cancellation=BVC(),
+        ),
+    )
 
 
 if __name__ == "__main__":
