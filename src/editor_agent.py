@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from pathlib import Path
@@ -19,6 +18,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_FILENAME = "doc.md"
 
 SYSTEM_PROMPT = """\
 You are a collaborative writing and editing assistant. You work alongside the user \
@@ -27,7 +27,7 @@ Think of yourself as a coworker sitting next to them, talking through ideas and 
 making edits together.
 
 ## What you can do
-- Create, read, and edit markdown files in the workspace.
+- Edit the shared markdown document in real time.
 - Help with any kind of writing: notes, blog posts, specs, plans, brainstorms, \
 documentation, outlines, meeting notes, lists — whatever the user needs.
 - Structure and reorganize content, fix prose, expand ideas, or trim things down.
@@ -49,10 +49,8 @@ and build on their work rather than overwriting it.
 is interacting by voice.
 - When reading back content, summarize rather than reading verbatim. Only read \
 the full text if the user asks.
-- File paths are relative to the workspace directory. The user can refer to files \
-by name without the .md extension.
-- For complex multi-step tasks (restructuring documents, batch edits, or creating \
-multiple related files), use the deep_think tool to delegate to a more capable agent.
+- For complex multi-step tasks, use the deep_think tool to delegate to a more \
+capable agent.
 - When you ask the user a question or present options, use yield_turn to wait \
 patiently for their response without any timeout pressure.
 """
@@ -64,10 +62,15 @@ class MarkdownEditorAgent(Agent):
             instructions=SYSTEM_PROMPT,
         )
         self._workspace = Path(workspace_dir).resolve()
-        self._backups: dict[str, str] = {}  # path -> previous content
+        self._file_path = self._workspace / DEFAULT_FILENAME
+        self._backup: str | None = None  # single-level undo
         self._room: rtc.Room | None = None
-        self._current_file: str | None = None  # currently active file (relative)
         self._turn_manager: MetalogTurnManager | None = None
+
+        # Ensure the file exists
+        self._workspace.mkdir(parents=True, exist_ok=True)
+        if not self._file_path.exists():
+            self._file_path.write_text("", encoding="utf-8")
 
     def set_turn_manager(self, manager: MetalogTurnManager) -> None:
         """Set the metalog turn manager for yield_turn support."""
@@ -78,30 +81,34 @@ class MarkdownEditorAgent(Agent):
         self._room = room
         room.on("data_received", self._on_data_received)
 
-    def _on_data_received(
-        self,
-        data: rtc.DataPacket,
-    ) -> None:
-        """Handle incoming data messages from the web client."""
+    def _on_data_received(self, data: rtc.DataPacket) -> None:
+        """Handle incoming edits from the web client."""
         try:
             payload = data.data
             msg = json.loads(payload.decode("utf-8"))
             if msg.get("type") == "human_edit" and msg.get("content") is not None:
-                file_name = msg.get("file") or self._current_file
-                if file_name:
-                    path = self._resolve_path(file_name)
-                    self._backup_file(path)
-                    path.write_text(msg["content"], encoding="utf-8")
-                    logger.info("Received human edit for %s", file_name)
+                self._backup = self._file_path.read_text(encoding="utf-8")
+                self._file_path.write_text(msg["content"], encoding="utf-8")
+                logger.info("Received human edit")
         except Exception as e:
             logger.warning("Error handling data message: %s", e)
 
-    async def _broadcast_doc(self, file_path: str, content: str) -> None:
-        """Send document content to connected web clients via data channel."""
+    def _read_doc(self) -> str:
+        return self._file_path.read_text(encoding="utf-8")
+
+    def _write_doc(self, content: str) -> None:
+        self._backup = self._read_doc()
+        self._file_path.write_text(content, encoding="utf-8")
+
+    async def _broadcast(self, content: str) -> None:
+        """Send document content to the web client via data channel."""
         if not self._room or not self._room.local_participant:
             return
-        self._current_file = file_path
-        msg = json.dumps({"type": "doc_update", "file": file_path, "content": content})
+        msg = json.dumps({
+            "type": "doc_update",
+            "file": DEFAULT_FILENAME,
+            "content": content,
+        })
         try:
             await self._room.local_participant.publish_data(
                 msg.encode("utf-8"),
@@ -110,57 +117,23 @@ class MarkdownEditorAgent(Agent):
         except Exception as e:
             logger.warning("Failed to broadcast doc update: %s", e)
 
-    def _resolve_path(self, file_path: str) -> Path:
-        """Resolve a path relative to workspace, rejecting escapes."""
-        if not file_path.endswith(".md"):
-            file_path = file_path + ".md"
-        resolved = (self._workspace / file_path).resolve()
-        if not str(resolved).startswith(str(self._workspace)):
-            raise ValueError(f"Path escapes workspace: {file_path}")
-        return resolved
-
-    def _backup_file(self, path: Path) -> None:
-        """Store a single-level backup for undo."""
-        if path.exists():
-            self._backups[str(path)] = path.read_text(encoding="utf-8")
-
-    # ── Reading tools ──────────────────────────────────────────────
+    # ── Reading tools ─────────────────────────────────────────────��
 
     @function_tool()
-    async def list_files(self, context: RunContext) -> str:
-        """List all markdown files in the workspace directory."""
-        files = sorted(self._workspace.rglob("*.md"))
-        if not files:
-            return "No markdown files found in workspace."
-        relative = [str(f.relative_to(self._workspace)) for f in files]
-        return "\n".join(relative)
+    async def read_doc(self, context: RunContext) -> str:
+        """Read the full document."""
+        content = self._read_doc()
+        await self._broadcast(content)
+        return content or "(empty document)"
 
     @function_tool()
-    async def read_file(self, context: RunContext, file_path: str) -> str:
-        """Read the entire contents of a markdown file.
+    async def read_section(self, context: RunContext, heading: str) -> str:
+        """Read a specific section by its heading.
 
         Args:
-            file_path: Path to the file relative to workspace.
+            heading: The heading text to search for (case-insensitive).
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        content = path.read_text(encoding="utf-8")
-        await self._broadcast_doc(file_path, content)
-        return content
-
-    @function_tool()
-    async def read_section(self, context: RunContext, file_path: str, heading: str) -> str:
-        """Read a specific section of a markdown file by its heading.
-
-        Args:
-            file_path: Path to the file relative to workspace.
-            heading: The heading text to search for (case-insensitive substring match).
-        """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        content = path.read_text(encoding="utf-8")
+        content = self._read_doc()
         matches = markdown_ops.find_section(content, heading)
         if not matches:
             return f"No section matching '{heading}' found."
@@ -171,16 +144,9 @@ class MarkdownEditorAgent(Agent):
         return f"## {s.heading} (lines {s.start_line}-{s.end_line})\n{s.body}"
 
     @function_tool()
-    async def get_file_outline(self, context: RunContext, file_path: str) -> str:
-        """Return the heading structure of a markdown file with line numbers.
-
-        Args:
-            file_path: Path to the file relative to workspace.
-        """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        content = path.read_text(encoding="utf-8")
+    async def get_outline(self, context: RunContext) -> str:
+        """Return the heading structure of the document with line numbers."""
+        content = self._read_doc()
         outline = markdown_ops.get_outline(content)
         if not outline:
             return "No headings found."
@@ -191,17 +157,13 @@ class MarkdownEditorAgent(Agent):
         return "\n".join(lines)
 
     @function_tool()
-    async def search_in_file(self, context: RunContext, file_path: str, query: str) -> str:
-        """Search for text in a file and return matching lines with line numbers.
+    async def search(self, context: RunContext, query: str) -> str:
+        """Search for text in the document.
 
         Args:
-            file_path: Path to the file relative to workspace.
             query: Text to search for (case-insensitive).
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        content = path.read_text(encoding="utf-8")
+        content = self._read_doc()
         query_lower = query.lower()
         matches = []
         for i, line in enumerate(content.split("\n"), 1):
@@ -215,63 +177,51 @@ class MarkdownEditorAgent(Agent):
 
     @function_tool()
     async def replace_section(
-        self, context: RunContext, file_path: str, heading: str, new_content: str
+        self, context: RunContext, heading: str, new_content: str
     ) -> str:
-        """Replace the body of a section (identified by heading) with new content.
+        """Replace the body of a section with new content.
 
         Args:
-            file_path: Path to the file relative to workspace.
             heading: The heading text to search for.
             new_content: The new body text for the section.
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        content = path.read_text(encoding="utf-8")
+        content = self._read_doc()
         matches = markdown_ops.find_section(content, heading)
         if not matches:
             return f"No section matching '{heading}' found."
         if len(matches) > 1:
             names = [f"- {s.heading} (line {s.start_line})" for s in matches]
             return "Multiple matches, be more specific:\n" + "\n".join(names)
-        self._backup_file(path)
         new = markdown_ops.replace_section_content(content, matches[0], new_content)
-        path.write_text(new, encoding="utf-8")
-        await self._broadcast_doc(file_path, new)
-        return f"Replaced section '{matches[0].heading}'. New content:\n{new_content}"
+        self._write_doc(new)
+        await self._broadcast(new)
+        return f"Replaced section '{matches[0].heading}'."
 
     @function_tool()
     async def find_and_replace(
         self,
         context: RunContext,
-        file_path: str,
         find_text: str,
         replace_text: str,
         occurrence: int = 0,
     ) -> str:
-        """Find and replace text in a file.
+        """Find and replace text in the document.
 
         Args:
-            file_path: Path to the file relative to workspace.
             find_text: The text to find.
             replace_text: The replacement text.
             occurrence: Which occurrence to replace (1-indexed). 0 means all.
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        content = path.read_text(encoding="utf-8")
+        content = self._read_doc()
         count = content.count(find_text)
         if count == 0:
-            return f"'{find_text}' not found in file."
-        self._backup_file(path)
+            return f"'{find_text}' not found."
         if occurrence == 0:
             new = content.replace(find_text, replace_text)
-            path.write_text(new, encoding="utf-8")
-            await self._broadcast_doc(file_path, new)
+            self._write_doc(new)
+            await self._broadcast(new)
             return f"Replaced all {count} occurrences."
         else:
-            # Replace the nth occurrence
             parts = content.split(find_text)
             if occurrence > count:
                 return f"Only {count} occurrences found, cannot replace #{occurrence}."
@@ -280,55 +230,46 @@ class MarkdownEditorAgent(Agent):
                 + replace_text
                 + find_text.join(parts[occurrence:])
             )
-            path.write_text(new, encoding="utf-8")
-            await self._broadcast_doc(file_path, new)
+            self._write_doc(new)
+            await self._broadcast(new)
             return f"Replaced occurrence #{occurrence} of {count}."
 
     @function_tool()
     async def insert_text(
-        self, context: RunContext, file_path: str, after_text: str, new_text: str
+        self, context: RunContext, after_text: str, new_text: str
     ) -> str:
         """Insert text after a specified anchor line.
 
         Args:
-            file_path: Path to the file relative to workspace.
-            after_text: Text to search for — new_text will be inserted after the line containing this.
+            after_text: Text to search for — new_text is inserted after the line containing this.
             new_text: The text to insert.
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        content = path.read_text(encoding="utf-8")
+        content = self._read_doc()
         lines = content.split("\n")
         after_lower = after_text.lower()
         found_line = None
         for i, line in enumerate(lines):
             if after_lower in line.lower():
-                found_line = i + 1  # 1-indexed
+                found_line = i + 1
                 break
         if found_line is None:
             return f"Anchor text '{after_text}' not found."
-        self._backup_file(path)
         new = markdown_ops.insert_after_line(content, found_line, new_text)
-        path.write_text(new, encoding="utf-8")
-        await self._broadcast_doc(file_path, new)
+        self._write_doc(new)
+        await self._broadcast(new)
         return f"Inserted text after line {found_line}."
 
     @function_tool()
     async def append_to_section(
-        self, context: RunContext, file_path: str, heading: str, content: str
+        self, context: RunContext, heading: str, content: str
     ) -> str:
         """Append text to the end of a section.
 
         Args:
-            file_path: Path to the file relative to workspace.
             heading: The heading text to search for.
             content: Text to append at the end of the section.
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        file_content = path.read_text(encoding="utf-8")
+        file_content = self._read_doc()
         matches = markdown_ops.find_section(file_content, heading)
         if not matches:
             return f"No section matching '{heading}' found."
@@ -336,48 +277,45 @@ class MarkdownEditorAgent(Agent):
             names = [f"- {s.heading} (line {s.start_line})" for s in matches]
             return "Multiple matches, be more specific:\n" + "\n".join(names)
         section = matches[0]
-        self._backup_file(path)
         new = markdown_ops.insert_after_line(file_content, section.end_line, content)
-        path.write_text(new, encoding="utf-8")
-        await self._broadcast_doc(file_path, new)
+        self._write_doc(new)
+        await self._broadcast(new)
         return f"Appended to section '{section.heading}'."
 
     @function_tool()
-    async def append_to_file(
-        self, context: RunContext, file_path: str, content: str
-    ) -> str:
-        """Append text to the end of a file.
+    async def append(self, context: RunContext, content: str) -> str:
+        """Append text to the end of the document.
 
         Args:
-            file_path: Path to the file relative to workspace.
             content: Text to append.
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        self._backup_file(path)
-        existing = path.read_text(encoding="utf-8")
+        existing = self._read_doc()
         if existing and not existing.endswith("\n"):
             existing += "\n"
         new = existing + content + "\n"
-        path.write_text(new, encoding="utf-8")
-        await self._broadcast_doc(file_path, new)
-        return "Content appended to end of file."
+        self._write_doc(new)
+        await self._broadcast(new)
+        return "Content appended."
 
     @function_tool()
-    async def delete_section(
-        self, context: RunContext, file_path: str, heading: str
-    ) -> str:
+    async def write_doc(self, context: RunContext, content: str) -> str:
+        """Replace the entire document content.
+
+        Args:
+            content: The new full document content.
+        """
+        self._write_doc(content)
+        await self._broadcast(content)
+        return "Document updated."
+
+    @function_tool()
+    async def delete_section(self, context: RunContext, heading: str) -> str:
         """Delete an entire section including its heading.
 
         Args:
-            file_path: Path to the file relative to workspace.
             heading: The heading text to search for.
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        file_content = path.read_text(encoding="utf-8")
+        file_content = self._read_doc()
         matches = markdown_ops.find_section(file_content, heading)
         if not matches:
             return f"No section matching '{heading}' found."
@@ -385,70 +323,42 @@ class MarkdownEditorAgent(Agent):
             names = [f"- {s.heading} (line {s.start_line})" for s in matches]
             return "Multiple matches, be more specific:\n" + "\n".join(names)
         section = matches[0]
-        self._backup_file(path)
         new = markdown_ops.delete_line_range(file_content, section.start_line, section.end_line)
-        path.write_text(new, encoding="utf-8")
-        await self._broadcast_doc(file_path, new)
-        return f"Deleted section '{section.heading}' (lines {section.start_line}-{section.end_line})."
+        self._write_doc(new)
+        await self._broadcast(new)
+        return f"Deleted section '{section.heading}'."
 
     @function_tool()
     async def delete_lines(
-        self, context: RunContext, file_path: str, start_line: int, end_line: int
+        self, context: RunContext, start_line: int, end_line: int
     ) -> str:
-        """Delete a range of lines from a file.
+        """Delete a range of lines from the document.
 
         Args:
-            file_path: Path to the file relative to workspace.
             start_line: First line to delete (1-indexed).
             end_line: Last line to delete (1-indexed, inclusive).
         """
-        path = self._resolve_path(file_path)
-        if not path.exists():
-            return f"File not found: {file_path}"
-        file_content = path.read_text(encoding="utf-8")
+        file_content = self._read_doc()
         total = len(file_content.split("\n"))
         if start_line < 1 or end_line > total or start_line > end_line:
-            return f"Invalid line range {start_line}-{end_line} (file has {total} lines)."
-        self._backup_file(path)
+            return f"Invalid line range {start_line}-{end_line} (document has {total} lines)."
         new = markdown_ops.delete_line_range(file_content, start_line, end_line)
-        path.write_text(new, encoding="utf-8")
-        await self._broadcast_doc(file_path, new)
+        self._write_doc(new)
+        await self._broadcast(new)
         return f"Deleted lines {start_line}-{end_line}."
 
-    # ── File management tools ──────────────────────────────────────
+    # ── Utility tools ─────────────────────────────────────────────
 
     @function_tool()
-    async def create_file(
-        self, context: RunContext, file_path: str, content: str = ""
-    ) -> str:
-        """Create a new markdown file.
-
-        Args:
-            file_path: Path for the new file relative to workspace.
-            content: Initial content for the file.
-        """
-        path = self._resolve_path(file_path)
-        if path.exists():
-            return f"File already exists: {file_path}"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        await self._broadcast_doc(file_path, content)
-        return f"Created {file_path}."
-
-    @function_tool()
-    async def undo(self, context: RunContext, file_path: str) -> str:
-        """Revert the last change to a file (single-level undo).
-
-        Args:
-            file_path: Path to the file relative to workspace.
-        """
-        path = self._resolve_path(file_path)
-        key = str(path)
-        if key not in self._backups:
-            return "No undo history for this file."
-        path.write_text(self._backups[key], encoding="utf-8")
-        del self._backups[key]
-        return f"Reverted {file_path} to previous version."
+    async def undo(self, context: RunContext) -> str:
+        """Revert the last change (single-level undo)."""
+        if self._backup is None:
+            return "Nothing to undo."
+        self._file_path.write_text(self._backup, encoding="utf-8")
+        content = self._backup
+        self._backup = None
+        await self._broadcast(content)
+        return "Reverted to previous version."
 
     @function_tool()
     async def yield_turn(self, context: RunContext, patience: float = 0) -> str:
@@ -476,8 +386,8 @@ class MarkdownEditorAgent(Agent):
     async def deep_think(self, context: RunContext, task: str) -> str:
         """Delegate a complex task to a more capable agent with full file access.
 
-        Use for multi-step work: restructuring documents, batch edits, creating
-        multiple related files, or tasks requiring planning and iteration.
+        Use for multi-step work: restructuring documents, batch edits, or
+        tasks requiring planning and iteration.
 
         Args:
             task: Detailed description of what needs to be done.
