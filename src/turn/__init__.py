@@ -1,5 +1,6 @@
-"""Metalog distribution-based turn detection for voice agents."""
+"""Turn detection extensions for LiveKit's dynamic endpointing."""
 
-from .manager import MetalogTurnManager
+from .flux_stt import FluxSTT
+from .patches import apply_turn_patches
 
-__all__ = ["MetalogTurnManager"]
+__all__ = ["FluxSTT", "apply_turn_patches"]

@@ -9,12 +9,12 @@ from dotenv import load_dotenv
 from livekit.agents import AgentServer, AgentSession, JobContext, cli
 from livekit.agents.inference.tts import TTS, ElevenlabsOptions
 from livekit.plugins.anthropic import LLM
-from livekit.plugins.deepgram import STTv2
 from livekit.plugins.silero import VAD
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from .editor_agent import MarkdownEditorAgent
-from .turn import MetalogTurnManager
+from .turn.flux_stt import FluxSTT
+from .turn.patches import apply_turn_patches
 
 load_dotenv(".env.local")
 
@@ -25,29 +25,33 @@ server = AgentServer()
 
 @server.rtc_session()
 async def entrypoint(ctx: JobContext):
+    flux_stt = FluxSTT(model="flux-general-en")
+    apply_turn_patches(flux_stt)
+
     editor = MarkdownEditorAgent(workspace_dir=WORKSPACE_DIR)
 
     session = AgentSession(
         vad=VAD.load(),
-        stt=STTv2(model="flux-general-en"),
+        stt=flux_stt,
         llm=LLM(model="claude-haiku-4-5-20251001"),
         tts=TTS(
             "elevenlabs/eleven_flash_v2_5",
             voice="cgSgspJ2msm6clMCkdW9",  # Jessica
             extra_kwargs=ElevenlabsOptions(speed=1.0),
         ),
-        turn_handling={"turn_detection": "manual"},
+        turn_detection=MultilingualModel(unlikely_threshold=0.4),
+        turn_handling={
+            "endpointing": {
+                "mode": "dynamic",
+                "min_delay": 0.2,
+                "max_delay": 3.0,
+            },
+        },
     )
 
     editor.set_room(ctx.room)
+    editor.set_session(session)
     await session.start(agent=editor, room=ctx.room, record=True)
-
-    # Metalog-based turn detection: uses the ONNX EOU model as a feature
-    # input (not as the turn detector) and manages turn-taking via a
-    # metalog distribution that learns from outcomes.
-    eou_model = MultilingualModel(unlikely_threshold=0.4)
-    turn_manager = MetalogTurnManager(session, eou_model=eou_model)
-    editor.set_turn_manager(turn_manager)
 
 
 if __name__ == "__main__":

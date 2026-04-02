@@ -8,13 +8,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from livekit import rtc
-from livekit.agents import function_tool, Agent, RunContext
+from livekit.agents import function_tool, Agent, AgentSession, RunContext
 
 from . import markdown_ops
 from .deep_agent import run_deep_agent
 
 if TYPE_CHECKING:
-    from .turn.manager import MetalogTurnManager
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -65,16 +65,16 @@ class MarkdownEditorAgent(Agent):
         self._file_path = self._workspace / DEFAULT_FILENAME
         self._backup: str | None = None  # single-level undo
         self._room: rtc.Room | None = None
-        self._turn_manager: MetalogTurnManager | None = None
+        self._session: AgentSession | None = None
 
         # Ensure the file exists
         self._workspace.mkdir(parents=True, exist_ok=True)
         if not self._file_path.exists():
             self._file_path.write_text("", encoding="utf-8")
 
-    def set_turn_manager(self, manager: MetalogTurnManager) -> None:
-        """Set the metalog turn manager for yield_turn support."""
-        self._turn_manager = manager
+    def set_session(self, session: AgentSession) -> None:
+        """Set the agent session for yield_turn support."""
+        self._session = session
 
     def set_room(self, room: rtc.Room) -> None:
         """Set the LiveKit room for data channel communication."""
@@ -366,21 +366,27 @@ class MarkdownEditorAgent(Agent):
 
         Args:
             patience: How patient to be. 0 = yield indefinitely (no timeout
-                at all, wait forever). 1-2 = a bit more patient than normal.
-                3-5 = very patient (good after giving complex explanations).
+                at all, wait forever). 1-5 = multiply max_delay by this factor
+                (good after complex explanations).
 
         Use patience=0 (the default) after asking a direct question or
         presenting choices. Use patience=2-3 after giving a complex
         explanation the user might need time to absorb.
         """
-        if self._turn_manager is None:
-            return "Turn manager not available."
-        if patience == 0:
-            self._turn_manager.yield_turn()
-            return "Yielded. Waiting indefinitely for user to speak."
-        else:
-            self._turn_manager.yield_turn(patience=patience)
-            return f"Patience increased by {patience}. Will be more patient for the next turn."
+        if self._session is None:
+            return "Session not available."
+        try:
+            if patience == 0:
+                # Indefinite yield: set very high max_delay
+                self._session.update_options(max_endpointing_delay=300.0)
+                return "Yielded. Waiting indefinitely for user to speak."
+            else:
+                # Patience mode: multiply max_delay
+                self._session.update_options(max_endpointing_delay=3.0 * patience)
+                return f"Max delay set to {3.0 * patience:.1f}s."
+        except Exception as e:
+            logger.warning("yield_turn failed: %s", e)
+            return f"Failed to adjust patience: {e}"
 
     @function_tool()
     async def deep_think(self, context: RunContext, task: str) -> str:
