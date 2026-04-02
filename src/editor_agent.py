@@ -79,17 +79,17 @@ class MarkdownEditorAgent(Agent):
     def set_session(self, session: AgentSession) -> None:
         """Set the agent session for yield_turn support."""
         self._session = session
-        # Reset max_delay after each committed user turn
-        session.on("user_state_changed", self._on_user_state_for_yield_reset)
+        # Reset yield after the agent finishes speaking (cycle complete)
+        session.on("agent_state_changed", self._on_agent_state_for_yield_reset)
 
-    def _on_user_state_for_yield_reset(self, ev: object) -> None:
-        """Reset max_delay after the user finishes speaking post-yield."""
+    def _on_agent_state_for_yield_reset(self, ev: object) -> None:
+        """Reset max_delay after the agent finishes speaking post-yield."""
         if not self._yield_active:
             return
         new_state = getattr(ev, "new_state", None)
         old_state = getattr(ev, "old_state", None)
-        # User started speaking → they're responding. Reset yield after they finish.
-        if old_state == "speaking" and new_state == "listening":
+        # Agent finished speaking → the yield cycle is complete, back to normal
+        if old_state == "speaking" and new_state in ("idle", "listening"):
             self._yield_active = False
             if self._session is not None:
                 self._session.update_options(
