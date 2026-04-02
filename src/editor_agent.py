@@ -6,12 +6,16 @@ import asyncio
 import json
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from livekit import rtc
 from livekit.agents import function_tool, Agent, RunContext
 
 from . import markdown_ops
 from .deep_agent import run_deep_agent
+
+if TYPE_CHECKING:
+    from .turn.manager import MetalogTurnManager
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,8 @@ the full text if the user asks.
 by name without the .md extension.
 - For complex multi-step tasks (restructuring documents, batch edits, or creating \
 multiple related files), use the deep_think tool to delegate to a more capable agent.
+- When you ask the user a question or present options, use yield_turn to wait \
+patiently for their response without any timeout pressure.
 """
 
 
@@ -61,6 +67,11 @@ class MarkdownEditorAgent(Agent):
         self._backups: dict[str, str] = {}  # path -> previous content
         self._room: rtc.Room | None = None
         self._current_file: str | None = None  # currently active file (relative)
+        self._turn_manager: MetalogTurnManager | None = None
+
+    def set_turn_manager(self, manager: MetalogTurnManager) -> None:
+        """Set the metalog turn manager for yield_turn support."""
+        self._turn_manager = manager
 
     def set_room(self, room: rtc.Room) -> None:
         """Set the LiveKit room for data channel communication."""
@@ -438,6 +449,28 @@ class MarkdownEditorAgent(Agent):
         path.write_text(self._backups[key], encoding="utf-8")
         del self._backups[key]
         return f"Reverted {file_path} to previous version."
+
+    @function_tool()
+    async def yield_turn(self, context: RunContext, patience: float = 0) -> str:
+        """Control how patiently the system waits for the user to speak.
+
+        Args:
+            patience: How patient to be. 0 = yield indefinitely (no timeout
+                at all, wait forever). 1-2 = a bit more patient than normal.
+                3-5 = very patient (good after giving complex explanations).
+
+        Use patience=0 (the default) after asking a direct question or
+        presenting choices. Use patience=2-3 after giving a complex
+        explanation the user might need time to absorb.
+        """
+        if self._turn_manager is None:
+            return "Turn manager not available."
+        if patience == 0:
+            self._turn_manager.yield_turn()
+            return "Yielded. Waiting indefinitely for user to speak."
+        else:
+            self._turn_manager.yield_turn(patience=patience)
+            return f"Patience increased by {patience}. Will be more patient for the next turn."
 
     @function_tool()
     async def deep_think(self, context: RunContext, task: str) -> str:
