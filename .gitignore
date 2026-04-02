@@ -10,3 +10,4 @@ editing/
 .DS_Store
 web/out/
 web/next-env.d.ts
+.gstack/
