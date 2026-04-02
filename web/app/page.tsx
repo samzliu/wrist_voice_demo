@@ -6,7 +6,7 @@ import {
   RoomAudioRenderer,
   useRoomContext,
 } from "@livekit/components-react";
-import { Room } from "livekit-client";
+import { Room, RoomEvent, ConnectionState } from "livekit-client";
 import { AppProvider, useApp } from "@/components/AppContext";
 import { PreRoomConfig } from "@/components/PreRoomConfig";
 import { FileSidebar } from "@/components/FileSidebar";
@@ -83,12 +83,34 @@ function AppShell({
   const sentConfig = useRef(false);
 
   useEffect(() => {
-    if (room && room.state === "connected" && !sentConfig.current) {
-      sentConfig.current = true;
+    const onConnected = () => {
       dispatch({ type: "SET_CONNECTED", value: true });
-      onRoomConnected(room);
+    };
+
+    // Send config when agent participant joins (not on our connect — agent may not be there yet)
+    const onParticipantConnected = () => {
+      if (!sentConfig.current) {
+        sentConfig.current = true;
+        onRoomConnected(room);
+      }
+    };
+
+    if (room.state === ConnectionState.Connected) {
+      onConnected();
+      // Agent might already be in the room
+      if (room.remoteParticipants.size > 0 && !sentConfig.current) {
+        sentConfig.current = true;
+        onRoomConnected(room);
+      }
     }
-  }, [room, room.state, dispatch, onRoomConnected]);
+
+    room.on(RoomEvent.Connected, onConnected);
+    room.on(RoomEvent.ParticipantConnected, onParticipantConnected);
+    return () => {
+      room.off(RoomEvent.Connected, onConnected);
+      room.off(RoomEvent.ParticipantConnected, onParticipantConnected);
+    };
+  }, [room, dispatch, onRoomConnected]);
 
   return (
     <div style={styles.shell}>

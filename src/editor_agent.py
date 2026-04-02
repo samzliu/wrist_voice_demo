@@ -78,6 +78,8 @@ class MarkdownEditorAgent(Agent):
     def set_room(self, room: rtc.Room) -> None:
         self._room = room
         room.on("data_received", self._on_data_received)
+        # Broadcast file list once the session starts (agent joins room)
+        asyncio.get_event_loop().call_later(2.0, lambda: asyncio.ensure_future(self._broadcast_file_list()))
 
     # ── Data channel handling ──────────────────────────────────
 

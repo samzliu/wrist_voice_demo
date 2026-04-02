@@ -5,10 +5,11 @@ import path from "path";
 export async function GET() {
   const root = process.env.WRIST_WORKSPACES_ROOT;
   if (!root || !fs.existsSync(root)) {
-    // Return default workspace
-    const defaultDir =
+    // Return default workspace — resolve relative paths to absolute
+    const raw =
       process.env.WRIST_WORKSPACE_DIR ||
       path.join(process.env.HOME || "~", "markdown");
+    const defaultDir = path.resolve(raw);
     return NextResponse.json({
       workspaces: [{ name: path.basename(defaultDir), path: defaultDir }],
     });
