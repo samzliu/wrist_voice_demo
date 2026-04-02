@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from livekit import rtc
 from livekit.agents import function_tool, Agent, AgentSession, RunContext
@@ -13,12 +12,10 @@ from livekit.agents import function_tool, Agent, AgentSession, RunContext
 from . import markdown_ops
 from .deep_agent import run_deep_agent
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_FILENAME = "doc.md"
+DEFAULT_MAX_DELAY = 3.0
 
 SYSTEM_PROMPT = """\
 You are a collaborative writing and editing assistant. You work alongside the user \
@@ -51,10 +48,6 @@ is interacting by voice.
 the full text if the user asks.
 - For complex multi-step tasks, use the deep_think tool to delegate to a more \
 capable agent.
-- Use yield_turn when you expect the user to speak at length — telling a story, \
-dictating content, outlining multiple points, or thinking through something \
-complex with pauses. This prevents you from jumping in during their natural \
-pauses. Do NOT use it for quick back-and-forth exchanges.
 """
 
 
@@ -68,8 +61,6 @@ class MarkdownEditorAgent(Agent):
         self._backup: str | None = None  # single-level undo
         self._room: rtc.Room | None = None
         self._session: AgentSession | None = None
-        self._default_max_delay: float = 3.0
-        self._yield_active: bool = False
 
         # Ensure the file exists
         self._workspace.mkdir(parents=True, exist_ok=True)
@@ -77,25 +68,8 @@ class MarkdownEditorAgent(Agent):
             self._file_path.write_text("", encoding="utf-8")
 
     def set_session(self, session: AgentSession) -> None:
-        """Set the agent session for yield_turn support."""
+        """Set the agent session for monologue toggle support."""
         self._session = session
-        # Reset yield after the agent finishes speaking (cycle complete)
-        session.on("agent_state_changed", self._on_agent_state_for_yield_reset)
-
-    def _on_agent_state_for_yield_reset(self, ev: object) -> None:
-        """Reset max_delay after the agent finishes speaking post-yield."""
-        if not self._yield_active:
-            return
-        new_state = getattr(ev, "new_state", None)
-        old_state = getattr(ev, "old_state", None)
-        # Agent finished speaking → the yield cycle is complete, back to normal
-        if old_state == "speaking" and new_state in ("idle", "listening"):
-            self._yield_active = False
-            if self._session is not None:
-                self._session.update_options(
-                    max_endpointing_delay=self._default_max_delay
-                )
-                logger.info("yield_turn reset: max_delay restored to %.1f", self._default_max_delay)
 
     def set_room(self, room: rtc.Room) -> None:
         """Set the LiveKit room for data channel communication."""
@@ -103,14 +77,28 @@ class MarkdownEditorAgent(Agent):
         room.on("data_received", self._on_data_received)
 
     def _on_data_received(self, data: rtc.DataPacket) -> None:
-        """Handle incoming edits from the web client."""
+        """Handle incoming messages from the web client."""
         try:
             payload = data.data
             msg = json.loads(payload.decode("utf-8"))
-            if msg.get("type") == "human_edit" and msg.get("content") is not None:
+            msg_type = msg.get("type")
+
+            if msg_type == "human_edit" and msg.get("content") is not None:
                 self._backup = self._file_path.read_text(encoding="utf-8")
                 self._file_path.write_text(msg["content"], encoding="utf-8")
                 logger.info("Received human edit")
+
+            elif msg_type == "monologue_on":
+                if self._session is not None:
+                    self._session.update_options(max_endpointing_delay=300.0)
+                    logger.info("Monologue mode ON: max_delay set to 300s")
+
+            elif msg_type == "monologue_off":
+                if self._session is not None:
+                    self._session.update_options(max_endpointing_delay=DEFAULT_MAX_DELAY)
+                    self._session.commit_user_turn()
+                    logger.info("Monologue mode OFF: max_delay restored, turn committed")
+
         except Exception as e:
             logger.warning("Error handling data message: %s", e)
 
@@ -138,7 +126,7 @@ class MarkdownEditorAgent(Agent):
         except Exception as e:
             logger.warning("Failed to broadcast doc update: %s", e)
 
-    # ── Reading tools ─────────────────────────────────────────────��
+    # ── Reading tools ──────────────────────────────────────────────
 
     @function_tool()
     async def read_doc(self, context: RunContext) -> str:
@@ -368,7 +356,7 @@ class MarkdownEditorAgent(Agent):
         await self._broadcast(new)
         return f"Deleted lines {start_line}-{end_line}."
 
-    # ── Utility tools ─────────────────────────────────────────────
+    # ── Utility tools ──────────────────────────────────────────────
 
     @function_tool()
     async def undo(self, context: RunContext) -> str:
@@ -380,41 +368,6 @@ class MarkdownEditorAgent(Agent):
         self._backup = None
         await self._broadcast(content)
         return "Reverted to previous version."
-
-    @function_tool()
-    async def yield_turn(self, context: RunContext, patience: float = 0) -> str:
-        """Give the user extra time to speak without being interrupted.
-
-        Call this BEFORE the user starts their response when you expect them to:
-        - Tell a story or give a long explanation
-        - Monologue or dictate content at length
-        - Think through something complex with pauses between thoughts
-        - Outline multiple items or details
-        - Answer a question that requires reflection
-
-        Do NOT call this for quick back-and-forth exchanges. Only use it when
-        the user needs room to speak at length or think with pauses.
-
-        Args:
-            patience: 0 = wait as long as needed (default, best for most cases).
-                1-3 = moderately more patient. Use when the user might pause
-                briefly but you still want normal turn-taking to resume soon.
-        """
-        if self._session is None:
-            return "Session not available."
-        try:
-            self._yield_active = True
-            if patience == 0:
-                self._session.update_options(max_endpointing_delay=300.0)
-                return "Listening mode on. Will wait for the user to finish."
-            else:
-                self._session.update_options(
-                    max_endpointing_delay=self._default_max_delay * (1 + patience)
-                )
-                return f"Extra patience set. Will reset after user speaks."
-        except Exception as e:
-            logger.warning("yield_turn failed: %s", e)
-            return f"Failed to adjust patience: {e}"
 
     @function_tool()
     async def deep_think(self, context: RunContext, task: str) -> str:

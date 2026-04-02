@@ -27,10 +27,6 @@ logger = logging.getLogger(__name__)
 FLUX_WEIGHT = 0.9
 ONNX_WEIGHT = 0.1
 
-# Auto-monologue detection thresholds
-MONOLOGUE_PAUSE_COUNT = 3  # after this many mid-turn pauses, extend patience
-MONOLOGUE_WORD_COUNT = 40  # or after this many words without agent responding
-
 
 def apply_turn_patches(flux_stt: FluxSTT | None = None) -> None:
     """Apply all turn detection patches. Call once at startup.
@@ -110,11 +106,6 @@ def _patch_eou_gate(flux_stt: FluxSTT | None) -> None:
         if self._stt and not self._audio_transcript and self._turn_detection_mode != "manual":
             return
 
-        # Track pause count per turn for monologue detection
-        if not hasattr(self, "_eou_pause_count"):
-            self._eou_pause_count = 0
-        self._eou_pause_count += 1
-
         chat_ctx = chat_ctx.copy()
         chat_ctx.add_message(role="user", content=self._audio_transcript)
         turn_detector = (
@@ -164,17 +155,6 @@ def _patch_eou_gate(flux_stt: FluxSTT | None) -> None:
                 t = combined_eou / 0.5
                 endpointing_delay = max_d + t * (mid_d - max_d)
 
-            # Auto-monologue detection: if user has paused many times or
-            # said many words, they're probably monologuing — use max_delay
-            # to avoid interrupting their flow.
-            word_count = len(self._audio_transcript.split()) if self._audio_transcript else 0
-            is_monologue = (
-                self._eou_pause_count >= MONOLOGUE_PAUSE_COUNT
-                or word_count >= MONOLOGUE_WORD_COUNT
-            )
-            if is_monologue:
-                endpointing_delay = max(endpointing_delay, max_d)
-
             logger.info(
                 "turn_decision",
                 extra={
@@ -185,9 +165,6 @@ def _patch_eou_gate(flux_stt: FluxSTT | None) -> None:
                     "min_delay": round(min_d, 3),
                     "mid_delay": round(mid_d, 3),
                     "max_delay": round(max_d, 3),
-                    "pause_count": self._eou_pause_count,
-                    "word_count": word_count,
-                    "is_monologue": is_monologue,
                 },
             )
 
@@ -237,7 +214,6 @@ def _patch_eou_gate(flux_stt: FluxSTT | None) -> None:
             )
 
             if committed:
-                self._eou_pause_count = 0  # reset for next turn
                 if hasattr(self, "_end_of_turn_detected_count"):
                     self._end_of_turn_detected_count += 1
 

@@ -7,7 +7,15 @@ import {
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
 
-export function VoicePanel({ connected }: { connected: boolean }) {
+export function VoicePanel({
+  connected,
+  monologue,
+  onToggleMonologue,
+}: {
+  connected: boolean;
+  monologue: boolean;
+  onToggleMonologue: () => void;
+}) {
   const participants = useParticipants();
   const { localParticipant } = useLocalParticipant();
 
@@ -70,10 +78,24 @@ export function VoicePanel({ connected }: { connected: boolean }) {
           source={Track.Source.Microphone}
           style={styles.micButton}
         />
+        <button
+          onClick={onToggleMonologue}
+          style={{
+            ...styles.monologueButton,
+            background: monologue ? "#854d0e" : "#1a1a1a",
+            borderColor: monologue ? "#ca8a04" : "#333",
+          }}
+        >
+          {monologue ? "Speaking..." : "Monologue"}
+        </button>
       </div>
 
       <div style={styles.footer}>
-        <p style={styles.hint}>Click the mic to toggle, or just start talking</p>
+        <p style={styles.hint}>
+          {monologue
+            ? "Monologue mode on — agent won't interrupt. Click again when done."
+            : "Click the mic to toggle, or just start talking"}
+        </p>
       </div>
     </div>
   );
@@ -158,6 +180,16 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     justifyContent: "center",
     fontSize: 20,
+  },
+  monologueButton: {
+    padding: "8px 16px",
+    borderRadius: 8,
+    border: "2px solid #333",
+    background: "#1a1a1a",
+    color: "#fff",
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
   },
   footer: {
     borderTop: "1px solid #222",

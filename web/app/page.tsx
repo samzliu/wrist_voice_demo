@@ -19,7 +19,8 @@ export default function Home() {
   const livekitUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL!;
 
   const connect = useCallback(async () => {
-    const res = await fetch("/api/token?room=coworker-room&identity=human");
+    const roomId = `coworker-${Date.now()}`;
+    const res = await fetch(`/api/token?room=${roomId}&identity=human`);
     const data = await res.json();
     setToken(data.token);
   }, []);
@@ -56,6 +57,7 @@ function AppContent({ connected }: { connected: boolean }) {
   const room = useRoomContext();
   const [doc, setDoc] = useState<string>("");
   const [fileName, setFileName] = useState<string>("");
+  const [monologue, setMonologue] = useState(false);
   const suppressEcho = useRef(false);
 
   // Listen for data messages from the agent
@@ -91,10 +93,21 @@ function AppContent({ connected }: { connected: boolean }) {
     [room, fileName],
   );
 
+  const toggleMonologue = useCallback(() => {
+    const next = !monologue;
+    setMonologue(next);
+    const msg = JSON.stringify({ type: next ? "monologue_on" : "monologue_off" });
+    room.localParticipant.publishData(encoder.encode(msg), { reliable: true });
+  }, [room, monologue]);
+
   return (
     <div style={styles.container}>
       <div style={styles.leftPanel}>
-        <VoicePanel connected={connected} />
+        <VoicePanel
+          connected={connected}
+          monologue={monologue}
+          onToggleMonologue={toggleMonologue}
+        />
       </div>
       <div style={styles.divider} />
       <div style={styles.rightPanel}>
