@@ -1,30 +1,33 @@
-"""Anthropic SDK agentic loop for complex multi-step file operations."""
+"""Anthropic SDK agentic loop for complex multi-step operations with full tool access."""
 
 from __future__ import annotations
 
 import asyncio
 import fnmatch
+import json
+import logging
 from pathlib import Path
 
 import anthropic
 
-SYSTEM_PROMPT = """\
-You are a writing and editing assistant. You can read, write, and search markdown \
-files in the workspace directory. Your job is to help with any kind of document \
-work — writing, restructuring, expanding, condensing, or creating new files. \
-Complete the task and return a summary of what you did."""
+from . import broadcast as bc
 
-TOOLS = [
+logger = logging.getLogger(__name__)
+
+SYSTEM_PROMPT = """\
+You are a capable assistant with access to file operations, web search, and slide editing. \
+Complete the task thoroughly and return a concise summary of what you did."""
+
+# ── Core file tools (always available) ─────────────────────
+
+FILE_TOOLS = [
     {
         "name": "read_file",
         "description": "Read the contents of a file.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path relative to workspace.",
-                },
+                "path": {"type": "string", "description": "File path relative to workspace."},
             },
             "required": ["path"],
         },
@@ -35,14 +38,8 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "path": {
-                    "type": "string",
-                    "description": "File path relative to workspace.",
-                },
-                "content": {
-                    "type": "string",
-                    "description": "The content to write.",
-                },
+                "path": {"type": "string", "description": "File path relative to workspace."},
+                "content": {"type": "string", "description": "The content to write."},
             },
             "required": ["path", "content"],
         },
@@ -66,10 +63,7 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Text to search for (case-insensitive).",
-                },
+                "query": {"type": "string", "description": "Text to search for (case-insensitive)."},
                 "glob_pattern": {
                     "type": "string",
                     "description": "Glob pattern to filter which files to search. Defaults to '*'.",
@@ -80,20 +74,113 @@ TOOLS = [
     },
 ]
 
+# ── Extended tools ─────────────────────────────────────────
+
+SEARCH_TOOLS = [
+    {
+        "name": "web_search",
+        "description": "Search the web using Exa. Returns titles, URLs, and snippets.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "visit_website",
+        "description": "Fetch a URL and extract its text content.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "The URL to visit."},
+            },
+            "required": ["url"],
+        },
+    },
+]
+
+SLIDE_TOOLS = [
+    {
+        "name": "list_slides",
+        "description": "List all slides in an HTML slide deck.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string", "description": "Path to the HTML slide deck."},
+            },
+            "required": ["file"],
+        },
+    },
+    {
+        "name": "get_slide",
+        "description": "Get a single slide's HTML content by index.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string", "description": "Path to the HTML slide deck."},
+                "slide_index": {"type": "integer", "description": "0-based slide index."},
+            },
+            "required": ["file", "slide_index"],
+        },
+    },
+    {
+        "name": "edit_slide",
+        "description": "Replace a slide's inner HTML content.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "file": {"type": "string", "description": "Path to the HTML slide deck."},
+                "slide_index": {"type": "integer", "description": "0-based slide index."},
+                "html_content": {"type": "string", "description": "New inner HTML for the slide."},
+            },
+            "required": ["file", "slide_index", "html_content"],
+        },
+    },
+]
+
+ALL_TOOLS = FILE_TOOLS + SEARCH_TOOLS + SLIDE_TOOLS
+
 MAX_ITERATIONS = 30
 TIMEOUT_SECONDS = 300
 
 
+class DeepAgentBridge:
+    """Bridge for the deep agent thread to communicate with the voice agent's event loop."""
+
+    def __init__(self, room, loop: asyncio.AbstractEventLoop):
+        self._room = room
+        self._loop = loop
+
+    def on_progress(self, msg: str) -> None:
+        asyncio.run_coroutine_threadsafe(
+            bc.broadcast_reasoning(self._room, f"[deep] {msg}"),
+            self._loop,
+        )
+
+    def on_tool_call(self, name: str, args: dict) -> None:
+        asyncio.run_coroutine_threadsafe(
+            bc.broadcast_tool_call(self._room, name, args, source="deep"),
+            self._loop,
+        )
+
+
 def _resolve_path(workspace: Path, rel_path: str) -> Path:
-    """Resolve a path relative to workspace, rejecting escapes."""
     resolved = (workspace / rel_path).resolve()
     if not str(resolved).startswith(str(workspace.resolve())):
         raise ValueError(f"Path escapes workspace: {rel_path}")
     return resolved
 
 
-def _execute_tool(name: str, input: dict, workspace: Path) -> str:
+def _execute_tool(
+    name: str, input: dict, workspace: Path, bridge: DeepAgentBridge | None = None
+) -> str:
     """Execute a tool and return the result as a string."""
+    if bridge:
+        bridge.on_tool_call(name, input)
+
+    # ── File tools ──
     if name == "read_file":
         path = _resolve_path(workspace, input["path"])
         if not path.exists():
@@ -132,39 +219,98 @@ def _execute_tool(name: str, input: dict, workspace: Path) -> str:
                     matches.append(f"{rel}:{i}: {line}")
         return "\n".join(matches[:100]) if matches else "No matches found."
 
+    # ── Search tools ──
+    elif name == "web_search":
+        from . import exa_tools
+
+        results = exa_tools.web_search(input["query"])
+        return json.dumps(results, indent=2)
+
+    elif name == "visit_website":
+        from . import web_tools
+        import asyncio as _aio
+
+        # Run async fetch in a new event loop since we're in a thread
+        result = _aio.run(web_tools.fetch_url(input["url"]))
+        return result.get("content", "Failed to fetch")
+
+    # ── Slide tools ──
+    elif name == "list_slides":
+        from . import slide_ops
+
+        path = _resolve_path(workspace, input["file"])
+        if not path.exists():
+            return f"File not found: {input['file']}"
+        html = path.read_text(encoding="utf-8")
+        summary = slide_ops.slide_summary(html)
+        return json.dumps(summary, indent=2)
+
+    elif name == "get_slide":
+        from . import slide_ops
+
+        path = _resolve_path(workspace, input["file"])
+        if not path.exists():
+            return f"File not found: {input['file']}"
+        html = path.read_text(encoding="utf-8")
+        slide = slide_ops.get_slide(html, input["slide_index"])
+        return slide if slide else f"Slide {input['slide_index']} not found."
+
+    elif name == "edit_slide":
+        from . import slide_ops
+
+        path = _resolve_path(workspace, input["file"])
+        if not path.exists():
+            return f"File not found: {input['file']}"
+        html = path.read_text(encoding="utf-8")
+        try:
+            new_html = slide_ops.replace_slide(html, input["slide_index"], input["html_content"])
+            path.write_text(new_html, encoding="utf-8")
+            return f"Slide {input['slide_index']} updated."
+        except IndexError as e:
+            return str(e)
+
     return f"Error: unknown tool: {name}"
 
 
-def _run_loop(task: str, workspace: Path) -> str:
+def _run_loop(
+    task: str,
+    workspace: Path,
+    bridge: DeepAgentBridge | None = None,
+) -> str:
     """Run the synchronous agentic loop. Called in a thread."""
     client = anthropic.Anthropic()
     messages: list[dict] = [{"role": "user", "content": task}]
 
-    for _ in range(MAX_ITERATIONS):
+    if bridge:
+        bridge.on_progress(f"Starting: {task[:100]}")
+
+    for iteration in range(MAX_ITERATIONS):
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             system=SYSTEM_PROMPT,
-            tools=TOOLS,
+            tools=ALL_TOOLS,
             messages=messages,
             max_tokens=4096,
         )
 
-        # Collect tool uses from the response
         tool_uses = [b for b in response.content if b.type == "tool_use"]
 
         if not tool_uses:
-            # No tool calls — extract final text and return
             text_parts = [b.text for b in response.content if hasattr(b, "text")]
-            return "\n".join(text_parts) or "Done (no summary produced)."
+            result = "\n".join(text_parts) or "Done (no summary produced)."
+            if bridge:
+                bridge.on_progress(f"Complete: {result[:100]}")
+            return result
 
-        # Execute tools and build results
         messages.append({"role": "assistant", "content": response.content})
         tool_results = []
         for tool_use in tool_uses:
             try:
-                result = _execute_tool(tool_use.name, tool_use.input, workspace)
+                result = _execute_tool(tool_use.name, tool_use.input, workspace, bridge)
             except ValueError as e:
                 result = f"Error: {e}"
+            if bridge:
+                bridge.on_progress(f"{tool_use.name} → {result[:150]}")
             tool_results.append({
                 "type": "tool_result",
                 "tool_use_id": tool_use.id,
@@ -175,17 +321,13 @@ def _run_loop(task: str, workspace: Path) -> str:
     return "Error: max iterations reached without completion."
 
 
-async def run_deep_agent(task: str, workspace: Path) -> str:
-    """Run the deep agent asynchronously with a timeout.
-
-    Args:
-        task: Description of the task to perform.
-        workspace: Path to the workspace directory.
-
-    Returns:
-        Summary of what the agent did.
-    """
+async def run_deep_agent(
+    task: str,
+    workspace: Path,
+    bridge: DeepAgentBridge | None = None,
+) -> str:
+    """Run the deep agent asynchronously with a timeout."""
     return await asyncio.wait_for(
-        asyncio.to_thread(_run_loop, task, workspace),
+        asyncio.to_thread(_run_loop, task, workspace, bridge),
         timeout=TIMEOUT_SECONDS,
     )
