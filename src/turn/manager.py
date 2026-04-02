@@ -64,7 +64,7 @@ class MetalogTurnManager:
         # Log-odds weights (phase 1: fixed naive Bayes; phase 2: learned)
         w_duration: float = 1.0,
         w_eou: float = 1.0,
-        bias: float = 0.0,
+        bias: float = 0.1,
         # Cost-sensitive threshold: tau = c_interrupt / (c_interrupt + c_latency)
         c_interrupt: float = 5.0,
         c_latency: float = 1.0,
@@ -86,6 +86,7 @@ class MetalogTurnManager:
         self._w_duration = w_duration
         self._w_eou = w_eou
         self._bias = bias
+        self._eou_available = True  # set False if EOU model fails repeatedly
 
         # Threshold from cost ratio
         self._tau = c_interrupt / (c_interrupt + c_latency)
@@ -457,13 +458,16 @@ class MetalogTurnManager:
 
     async def _get_eou_prob(self) -> float:
         """Call the ONNX EOU model for end-of-utterance probability."""
+        if not self._eou_available:
+            return 0.5
         try:
             chat_ctx = self._session.chat_ctx.copy()
             chat_ctx.add_message(role="user", content=self._current_transcript)
             prob = await self._eou_model.predict_end_of_turn(chat_ctx, timeout=3.0)
             return float(prob)
         except Exception:
-            logger.warning("EOU prediction failed, defaulting to 0.5")
+            logger.warning("EOU prediction failed, disabling EOU model")
+            self._eou_available = False
             return 0.5
 
     def _cancel_monitor_task(self) -> None:
