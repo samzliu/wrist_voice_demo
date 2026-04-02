@@ -82,6 +82,8 @@ const styles: Record<string, React.CSSProperties> = {
   },
   content: {
     flex: 1,
+    display: "flex",
+    flexDirection: "column",
     overflow: "hidden",
   },
   placeholder: {
