@@ -78,6 +78,7 @@ export type ConfigMsg = {
   type: "config";
   script_content: string;
   workspace_path: string;
+  mode: "workspace" | "chat";
 };
 export type HumanEditMsg = { type: "human_edit"; content: string; file: string };
 export type PauseMsg = { type: "pause" };

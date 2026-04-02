@@ -5,8 +5,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 type Script = { name: string; preview: string; content: string };
 type Workspace = { name: string; path: string };
 
+export type SessionMode = "workspace" | "chat";
+
 interface PreRoomConfigProps {
-  onConnect: (scriptContent: string, workspacePath: string) => void;
+  onConnect: (
+    scriptContent: string,
+    workspacePath: string,
+    mode: SessionMode,
+  ) => void;
 }
 
 export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
@@ -14,11 +20,11 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedScript, setSelectedScript] = useState("");
   const [scriptContent, setScriptContent] = useState("");
-  const [selectedWorkspace, setSelectedWorkspace] = useState("");
+  const [workspacePath, setWorkspacePath] = useState("");
   const [customScriptName, setCustomScriptName] = useState("");
+  const [mode, setMode] = useState<SessionMode>("workspace");
   const [loading, setLoading] = useState(true);
   const scriptInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     Promise.all([
@@ -31,7 +37,7 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
         .then((d) => {
           const ws = d.workspaces || [];
           setWorkspaces(ws);
-          if (ws.length > 0) setSelectedWorkspace(ws[0].path);
+          if (ws.length > 0) setWorkspacePath(ws[0].path);
         })
         .catch(() => {}),
     ]).finally(() => setLoading(false));
@@ -44,25 +50,10 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
       setCustomScriptName(file.name.replace(/\.md$/, ""));
       const reader = new FileReader();
       reader.onload = () => {
-        const text = reader.result as string;
-        setScriptContent(text);
+        setScriptContent(reader.result as string);
         setSelectedScript("__custom__");
       };
       reader.readAsText(file);
-    },
-    [],
-  );
-
-  const handleFolderSelect = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-      // webkitRelativePath gives us "foldername/file" — extract the folder
-      const firstPath = files[0].webkitRelativePath;
-      const folderName = firstPath.split("/")[0];
-      // We can't get the absolute path from the browser, so use the folder name
-      // and let the backend resolve it
-      setSelectedWorkspace(folderName);
     },
     [],
   );
@@ -73,8 +64,8 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
       const found = scripts.find((s) => s.name === selectedScript);
       if (found) script = found.content;
     }
-    onConnect(script, selectedWorkspace);
-  }, [scripts, selectedScript, scriptContent, selectedWorkspace, onConnect]);
+    onConnect(script, mode === "workspace" ? workspacePath : "", mode);
+  }, [scripts, selectedScript, scriptContent, workspacePath, mode, onConnect]);
 
   if (loading) {
     return (
@@ -97,9 +88,44 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
       </p>
 
       <div style={styles.form}>
+        {/* Mode toggle */}
+        <div style={styles.field}>
+          <label style={styles.label}>Mode</label>
+          <div style={styles.modeRow}>
+            <button
+              onClick={() => setMode("workspace")}
+              style={{
+                ...styles.modeBtn,
+                ...(mode === "workspace" ? styles.modeBtnActive : {}),
+              }}
+            >
+              <span style={styles.modeIcon}>📁</span>
+              <span>Workspace</span>
+              <span style={styles.modeDesc}>
+                Files, slides, search, editing
+              </span>
+            </button>
+            <button
+              onClick={() => setMode("chat")}
+              style={{
+                ...styles.modeBtn,
+                ...(mode === "chat" ? styles.modeBtnActive : {}),
+              }}
+            >
+              <span style={styles.modeIcon}>💬</span>
+              <span>Chat</span>
+              <span style={styles.modeDesc}>
+                Voice only — roleplay, practice, discuss
+              </span>
+            </button>
+          </div>
+        </div>
+
         {/* Persona / Script */}
         <div style={styles.field}>
-          <label style={styles.label}>Persona / Script</label>
+          <label style={styles.label}>
+            {mode === "chat" ? "Role / Script" : "Persona / Script"}
+          </label>
           <div style={styles.pickerRow}>
             {scripts.length > 0 && (
               <select
@@ -111,7 +137,9 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
                 }}
                 style={styles.select}
               >
-                <option value="">None (default)</option>
+                <option value="">
+                  {mode === "chat" ? "None (freeform)" : "None (default)"}
+                </option>
                 {scripts.map((s) => (
                   <option key={s.name} value={s.name}>
                     {s.name}
@@ -123,7 +151,9 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
               onClick={() => scriptInputRef.current?.click()}
               style={styles.fileBtn}
             >
-              {activeScriptName ? `📄 ${activeScriptName}` : "Browse .md file..."}
+              {activeScriptName
+                ? `📄 ${activeScriptName}`
+                : "Browse .md file..."}
             </button>
             <input
               ref={scriptInputRef}
@@ -142,35 +172,43 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
           )}
         </div>
 
-        {/* Workspace folder */}
-        <div style={styles.field}>
-          <label style={styles.label}>Workspace Folder</label>
-          <div style={styles.pickerRow}>
+        {/* Workspace folder — only in workspace mode */}
+        {mode === "workspace" && (
+          <div style={styles.field}>
+            <label style={styles.label}>Workspace Folder</label>
             {workspaces.length > 0 && (
               <select
-                value={selectedWorkspace}
-                onChange={(e) => setSelectedWorkspace(e.target.value)}
-                style={styles.select}
+                value={
+                  workspaces.find((w) => w.path === workspacePath)
+                    ? workspacePath
+                    : "__custom__"
+                }
+                onChange={(e) => {
+                  if (e.target.value !== "__custom__") {
+                    setWorkspacePath(e.target.value);
+                  }
+                }}
+                style={{ ...styles.select, marginBottom: 6 }}
               >
                 {workspaces.map((w) => (
                   <option key={w.path} value={w.path}>
-                    {w.name}
+                    {w.name} — {w.path}
                   </option>
                 ))}
+                <option value="__custom__">Custom path...</option>
               </select>
             )}
             <input
-              value={
-                workspaces.find((w) => w.path === selectedWorkspace)
-                  ? ""
-                  : selectedWorkspace
-              }
-              onChange={(e) => setSelectedWorkspace(e.target.value)}
+              value={workspacePath}
+              onChange={(e) => setWorkspacePath(e.target.value)}
               style={styles.pathInput}
-              placeholder="Or type a path..."
+              placeholder="/absolute/path/to/folder"
             />
+            <span style={styles.pathHint}>
+              Paste an absolute path to any folder on your machine
+            </span>
           </div>
-        </div>
+        )}
       </div>
 
       <button onClick={handleConnect} style={styles.connectBtn}>
@@ -205,7 +243,7 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 20,
-    width: 420,
+    width: 480,
     marginBottom: 32,
   },
   field: {
@@ -217,6 +255,39 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 13,
     fontWeight: 600,
     color: "#888",
+  },
+  modeRow: {
+    display: "flex",
+    gap: 10,
+  },
+  modeBtn: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column" as const,
+    alignItems: "center",
+    gap: 4,
+    padding: "14px 12px",
+    background: "#111",
+    border: "2px solid #222",
+    borderRadius: 10,
+    color: "#888",
+    cursor: "pointer",
+    fontSize: 14,
+    fontWeight: 600,
+  },
+  modeBtnActive: {
+    borderColor: "#fafafa",
+    color: "#fafafa",
+    background: "#1a1a1a",
+  },
+  modeIcon: {
+    fontSize: 22,
+  },
+  modeDesc: {
+    fontSize: 11,
+    fontWeight: 400,
+    color: "#555",
+    marginTop: 2,
   },
   pickerRow: {
     display: "flex",
@@ -240,10 +311,9 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 6,
     color: "#aaa",
     cursor: "pointer",
-    whiteSpace: "nowrap",
+    whiteSpace: "nowrap" as const,
   },
   pathInput: {
-    flex: 1,
     padding: "10px 12px",
     fontSize: 13,
     background: "#111",
@@ -251,6 +321,11 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: 6,
     color: "#fafafa",
     outline: "none",
+    fontFamily: "monospace",
+  },
+  pathHint: {
+    fontSize: 11,
+    color: "#555",
   },
   preview: {
     fontSize: 12,

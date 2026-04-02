@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_FILENAME = "doc.md"
 DEFAULT_MAX_DELAY = 3.0
 
-SYSTEM_PROMPT = """\
+SYSTEM_PROMPT_WORKSPACE = """\
 You are a writing collaborator. The user sees your edits live on screen.
 
 Be terse. Don't narrate actions — the user sees tool results live. Only speak \
@@ -36,6 +36,17 @@ Summarize rather than read verbatim.
 
 For complex multi-step tasks, use deep_think (blocking) or deep_think_background \
 (continues conversation while working).
+"""
+
+SYSTEM_PROMPT_CHAT = """\
+You are a voice conversation partner. Be natural, concise, and responsive.
+
+Be terse. Short sentences. Don't repeat things back. Don't narrate what you're \
+doing. Respond like a real person — with agency, opinions, and shorthand.
+
+One question at a time. Keep exchanges tight. No markdown formatting in speech.
+
+You can use web_search and visit_website if the conversation calls for research.
 """
 
 
@@ -57,7 +68,7 @@ def _file_type(name: str) -> str:
 
 class MarkdownEditorAgent(Agent):
     def __init__(self, workspace_dir: str) -> None:
-        super().__init__(instructions=SYSTEM_PROMPT)
+        super().__init__(instructions=SYSTEM_PROMPT_WORKSPACE)
         self._workspace = Path(workspace_dir).resolve()
         self._file_path = self._workspace / DEFAULT_FILENAME
         self._backup: str | None = None
@@ -65,6 +76,7 @@ class MarkdownEditorAgent(Agent):
         self._session: AgentSession | None = None
         self._paused: bool = False
         self._persona_content: str = ""
+        self._mode: str = "workspace"
         self._background_tasks: dict[str, asyncio.Task] = {}
 
         # Ensure workspace exists
@@ -124,8 +136,11 @@ class MarkdownEditorAgent(Agent):
             logger.warning("Error handling data message: %s", e)
 
     def _handle_config(self, msg: dict) -> None:
+        self._mode = msg.get("mode", "workspace")
+        base_prompt = SYSTEM_PROMPT_CHAT if self._mode == "chat" else SYSTEM_PROMPT_WORKSPACE
+
         workspace_path = msg.get("workspace_path", "")
-        if workspace_path:
+        if workspace_path and self._mode == "workspace":
             new_ws = Path(workspace_path).resolve()
             if new_ws.is_dir():
                 self._workspace = new_ws
@@ -138,11 +153,14 @@ class MarkdownEditorAgent(Agent):
         script_content = msg.get("script_content", "")
         if script_content:
             self._persona_content = script_content
-            new_instructions = SYSTEM_PROMPT + "\n\n" + script_content
-            self.update_instructions(new_instructions)
-            logger.info("Persona loaded")
+            new_instructions = base_prompt + "\n\n" + script_content
+        else:
+            new_instructions = base_prompt
+        self.update_instructions(new_instructions)
+        logger.info("Config applied: mode=%s, persona=%s", self._mode, bool(script_content))
 
-        asyncio.create_task(self._broadcast_file_list())
+        if self._mode == "workspace":
+            asyncio.create_task(self._broadcast_file_list())
 
     def _handle_pause(self) -> None:
         self._paused = True
