@@ -7,3 +7,6 @@ dist/
 *.egg-info/
 .mypy_cache/
 editing/
+.DS_Store
+web/out/
+web/next-env.d.ts
