@@ -128,10 +128,10 @@ class MetalogTurnManager:
         self._recent_outcomes: list[bool] = []  # True = TP, False = FP
         self._max_outcome_window = 20
 
-        # Register event handlers
-        session.on("user_state_changed", self._on_user_state_changed)
-        session.on("agent_state_changed", self._on_agent_state_changed)
-        session.on("user_input_transcribed", self._on_user_input_transcribed)
+        # Register event handlers (must be sync — spawn tasks for async work)
+        session.on("user_state_changed", self._sync_on_user_state_changed)
+        session.on("agent_state_changed", self._sync_on_agent_state_changed)
+        session.on("user_input_transcribed", self._sync_on_user_input_transcribed)
 
         logger.info(
             "metalog_turn_manager_init",
@@ -178,6 +178,15 @@ class MetalogTurnManager:
     # ------------------------------------------------------------------
     # Event handlers
     # ------------------------------------------------------------------
+
+    def _sync_on_user_state_changed(self, ev: object) -> None:
+        asyncio.create_task(self._on_user_state_changed(ev))
+
+    def _sync_on_agent_state_changed(self, ev: object) -> None:
+        asyncio.create_task(self._on_agent_state_changed(ev))
+
+    def _sync_on_user_input_transcribed(self, ev: object) -> None:
+        asyncio.create_task(self._on_user_input_transcribed(ev))
 
     async def _on_user_state_changed(self, ev: object) -> None:
         new_state = getattr(ev, "new_state", None)

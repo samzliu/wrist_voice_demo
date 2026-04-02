@@ -36,7 +36,7 @@ async def entrypoint(ctx: JobContext):
             voice="cgSgspJ2msm6clMCkdW9",  # Jessica
             extra_kwargs=ElevenlabsOptions(speed=1.0),
         ),
-        turn_detection="manual",
+        turn_handling={"turn_detection": "manual"},
     )
 
     editor.set_room(ctx.room)
