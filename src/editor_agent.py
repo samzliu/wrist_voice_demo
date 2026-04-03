@@ -6,6 +6,8 @@ import asyncio
 import fnmatch
 import json
 import logging
+import shutil
+import tempfile
 import time
 from pathlib import Path
 
@@ -77,6 +79,7 @@ class MarkdownEditorAgent(Agent):
         self._paused: bool = False
         self._persona_content: str = ""
         self._mode: str = "workspace"
+        self._temp_workspace: str | None = None  # set if we created a temp dir
         self._background_tasks: dict[str, asyncio.Task] = {}
 
         # Ensure workspace exists
@@ -140,15 +143,24 @@ class MarkdownEditorAgent(Agent):
         base_prompt = SYSTEM_PROMPT_CHAT if self._mode == "chat" else SYSTEM_PROMPT_WORKSPACE
 
         workspace_path = msg.get("workspace_path", "")
-        if workspace_path and self._mode == "workspace":
-            new_ws = Path(workspace_path).resolve()
-            if new_ws.is_dir():
+        if self._mode == "workspace":
+            if workspace_path:
+                # Local mode: use the provided path
+                new_ws = Path(workspace_path).resolve()
+                new_ws.mkdir(parents=True, exist_ok=True)
                 self._workspace = new_ws
                 self._file_path = new_ws / DEFAULT_FILENAME
-                new_ws.mkdir(parents=True, exist_ok=True)
                 if not self._file_path.exists():
                     self._file_path.write_text("", encoding="utf-8")
                 logger.info("Workspace set to %s", new_ws)
+            else:
+                # Server mode: create a temp workspace for this session
+                tmp = tempfile.mkdtemp(prefix="wrist-session-")
+                self._temp_workspace = tmp
+                self._workspace = Path(tmp)
+                self._file_path = self._workspace / DEFAULT_FILENAME
+                self._file_path.write_text("", encoding="utf-8")
+                logger.info("Created temp workspace: %s", tmp)
 
         script_content = msg.get("script_content", "")
         if script_content:
@@ -161,6 +173,12 @@ class MarkdownEditorAgent(Agent):
 
         if self._mode == "workspace":
             asyncio.create_task(self._broadcast_file_list())
+
+    def cleanup(self) -> None:
+        """Clean up temp workspace on disconnect."""
+        if self._temp_workspace and Path(self._temp_workspace).exists():
+            shutil.rmtree(self._temp_workspace, ignore_errors=True)
+            logger.info("Cleaned up temp workspace: %s", self._temp_workspace)
 
     def _handle_pause(self) -> None:
         self._paused = True

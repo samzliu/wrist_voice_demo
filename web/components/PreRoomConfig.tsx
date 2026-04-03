@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 type Script = { name: string; preview: string; content: string };
 type Workspace = { name: string; path: string };
+type EnvMode = "local" | "server";
 
 export type SessionMode = "workspace" | "chat";
 
@@ -18,6 +19,7 @@ interface PreRoomConfigProps {
 export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
   const [scripts, setScripts] = useState<Script[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [envMode, setEnvMode] = useState<EnvMode>("server");
   const [selectedScript, setSelectedScript] = useState("");
   const [scriptContent, setScriptContent] = useState("");
   const [workspacePath, setWorkspacePath] = useState("");
@@ -30,13 +32,19 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
     Promise.all([
       fetch("/api/scripts")
         .then((r) => r.json())
-        .then((d) => setScripts(d.scripts || []))
+        .then((d) => {
+          const s = d.scripts || [];
+          setScripts(s);
+          // Auto-select first script as default if available
+          if (s.length > 0) setSelectedScript(s[0].name);
+        })
         .catch(() => {}),
       fetch("/api/workspaces")
         .then((r) => r.json())
         .then((d) => {
           const ws = d.workspaces || [];
           setWorkspaces(ws);
+          setEnvMode(d.mode || "server");
           if (ws.length > 0) setWorkspacePath(ws[0].path);
         })
         .catch(() => {}),
@@ -64,8 +72,10 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
       const found = scripts.find((s) => s.name === selectedScript);
       if (found) script = found.content;
     }
-    onConnect(script, mode === "workspace" ? workspacePath : "", mode);
-  }, [scripts, selectedScript, scriptContent, workspacePath, mode, onConnect]);
+    // In server mode or chat mode, send empty workspace path — agent creates temp dir
+    const ws = mode === "workspace" && envMode === "local" ? workspacePath : "";
+    onConnect(script, ws, mode);
+  }, [scripts, selectedScript, scriptContent, workspacePath, mode, envMode, onConnect]);
 
   if (loading) {
     return (
@@ -79,6 +89,8 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
     selectedScript === "__custom__"
       ? customScriptName
       : selectedScript || null;
+
+  const showWorkspacePicker = mode === "workspace" && envMode === "local";
 
   return (
     <div style={styles.landing}>
@@ -153,7 +165,7 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
             >
               {activeScriptName
                 ? `📄 ${activeScriptName}`
-                : "Browse .md file..."}
+                : "Upload .md file..."}
             </button>
             <input
               ref={scriptInputRef}
@@ -172,8 +184,8 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
           )}
         </div>
 
-        {/* Workspace folder — only in workspace mode */}
-        {mode === "workspace" && (
+        {/* Workspace folder — only in workspace mode + local env */}
+        {showWorkspacePicker && (
           <div style={styles.field}>
             <label style={styles.label}>Workspace Folder</label>
             {workspaces.length > 0 && (
@@ -204,9 +216,14 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
               style={styles.pathInput}
               placeholder="/absolute/path/to/folder"
             />
-            <span style={styles.pathHint}>
-              Paste an absolute path to any folder on your machine
-            </span>
+          </div>
+        )}
+
+        {/* Server mode info */}
+        {mode === "workspace" && envMode === "server" && (
+          <div style={styles.serverNote}>
+            A temporary workspace will be created for this session. Use the
+            download button to save your files before disconnecting.
           </div>
         )}
       </div>
@@ -323,10 +340,6 @@ const styles: Record<string, React.CSSProperties> = {
     outline: "none",
     fontFamily: "monospace",
   },
-  pathHint: {
-    fontSize: 11,
-    color: "#555",
-  },
   preview: {
     fontSize: 12,
     color: "#666",
@@ -336,6 +349,15 @@ const styles: Record<string, React.CSSProperties> = {
     maxHeight: 60,
     overflow: "hidden",
     lineHeight: 1.4,
+  },
+  serverNote: {
+    fontSize: 12,
+    color: "#888",
+    padding: "10px 14px",
+    background: "#111",
+    borderRadius: 6,
+    border: "1px solid #222",
+    lineHeight: 1.5,
   },
   connectBtn: {
     padding: "14px 40px",

@@ -53,6 +53,12 @@ async def entrypoint(ctx: JobContext):
 
     editor.set_room(ctx.room)
     editor.set_session(session)
+
+    # Clean up temp workspace when room closes
+    @ctx.room.on("disconnected")
+    def on_disconnect():
+        editor.cleanup()
+
     await session.start(
         agent=editor,
         room=ctx.room,
