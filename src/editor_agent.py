@@ -165,11 +165,21 @@ class MarkdownEditorAgent(Agent):
         script_content = msg.get("script_content", "")
         if script_content:
             self._persona_content = script_content
-            new_instructions = base_prompt + "\n\n" + script_content
+            new_instructions = (
+                base_prompt
+                + "\n\n## Your Role / Persona\n\n"
+                + "IMPORTANT: You MUST adopt the following role and personality for this "
+                + "entire conversation. Stay in character at all times. This defines who "
+                + "you are, how you speak, and how you behave:\n\n"
+                + script_content
+            )
         else:
             new_instructions = base_prompt
         self.update_instructions(new_instructions)
-        logger.info("Config applied: mode=%s, persona=%s", self._mode, bool(script_content))
+        logger.info(
+            "Config applied: mode=%s, persona=%s, persona_len=%d",
+            self._mode, bool(script_content), len(script_content),
+        )
 
         if self._mode == "workspace":
             asyncio.create_task(self._broadcast_file_list())
