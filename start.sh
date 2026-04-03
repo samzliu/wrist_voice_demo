@@ -18,7 +18,7 @@ cd ..
 
 # Download turn detector model, then start agent with minimal workers
 python -m src.agent download-files 2>/dev/null || true
-python -m src.agent start --num-idle-processes=1 &
+python -m src.agent start &
 AGENT_PID=$!
 
 # If either exits, kill the other

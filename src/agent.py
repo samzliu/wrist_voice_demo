@@ -22,7 +22,7 @@ load_dotenv(".env.local")
 
 WORKSPACE_DIR = os.environ.get("WRIST_WORKSPACE_DIR", os.path.expanduser("~/markdown"))
 
-server = AgentServer()
+server = AgentServer(num_idle_processes=1)
 
 
 @server.rtc_session()
