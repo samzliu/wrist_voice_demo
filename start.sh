@@ -16,9 +16,9 @@ cd web && PORT="$PORT" npx next start -p "$PORT" &
 WEB_PID=$!
 cd ..
 
-# Download turn detector model, then start LiveKit agent
+# Download turn detector model, then start agent with minimal workers
 python -m src.agent download-files 2>/dev/null || true
-python -m src.agent start &
+python -m src.agent start --num-idle-processes=1 &
 AGENT_PID=$!
 
 # If either exits, kill the other
