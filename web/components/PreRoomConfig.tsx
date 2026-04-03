@@ -138,43 +138,43 @@ export function PreRoomConfig({ onConnect }: PreRoomConfigProps) {
           <label style={styles.label}>
             {mode === "chat" ? "Role / Script" : "Persona / Script"}
           </label>
-          <div style={styles.pickerRow}>
-            {scripts.length > 0 && (
-              <select
-                value={selectedScript === "__custom__" ? "" : selectedScript}
-                onChange={(e) => {
-                  setSelectedScript(e.target.value);
-                  setScriptContent("");
-                  setCustomScriptName("");
-                }}
-                style={styles.select}
-              >
-                <option value="">
-                  {mode === "chat" ? "None (freeform)" : "None (default)"}
-                </option>
-                {scripts.map((s) => (
-                  <option key={s.name} value={s.name}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-            )}
-            <button
-              onClick={() => scriptInputRef.current?.click()}
-              style={styles.fileBtn}
+          {scripts.length > 0 && (
+            <select
+              value={selectedScript === "__custom__" ? "" : selectedScript}
+              onChange={(e) => {
+                setSelectedScript(e.target.value);
+                setScriptContent("");
+                setCustomScriptName("");
+              }}
+              style={styles.select}
             >
-              {activeScriptName
-                ? `📄 ${activeScriptName}`
-                : "Upload .md file..."}
-            </button>
+              <option value="">
+                {mode === "chat" ? "None (freeform)" : "None (default)"}
+              </option>
+              {scripts.map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <label style={styles.uploadLabel}>
             <input
               ref={scriptInputRef}
               type="file"
               accept=".md,.markdown,.txt"
               onChange={handleScriptFile}
-              style={{ display: "none" }}
+              style={styles.hiddenInput}
             />
-          </div>
+            <span style={{
+              ...styles.uploadBtn,
+              ...(selectedScript === "__custom__" ? styles.uploadBtnLoaded : {}),
+            }}>
+              {selectedScript === "__custom__"
+                ? `Loaded: ${customScriptName}`
+                : "Upload a .md file"}
+            </span>
+          </label>
           {activeScriptName && (
             <div style={styles.preview}>
               {selectedScript === "__custom__"
@@ -306,12 +306,7 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#555",
     marginTop: 2,
   },
-  pickerRow: {
-    display: "flex",
-    gap: 8,
-  },
   select: {
-    flex: 1,
     padding: "10px 12px",
     fontSize: 14,
     background: "#111",
@@ -320,15 +315,30 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#fafafa",
     outline: "none",
   },
-  fileBtn: {
+  uploadLabel: {
+    cursor: "pointer",
+  },
+  hiddenInput: {
+    position: "absolute" as const,
+    width: 1,
+    height: 1,
+    opacity: 0,
+    overflow: "hidden",
+  },
+  uploadBtn: {
+    display: "block",
     padding: "10px 14px",
     fontSize: 13,
     background: "#1a1a1a",
     border: "1px solid #333",
     borderRadius: 6,
     color: "#aaa",
-    cursor: "pointer",
-    whiteSpace: "nowrap" as const,
+    textAlign: "center" as const,
+  },
+  uploadBtnLoaded: {
+    background: "#0f2a1a",
+    borderColor: "#166534",
+    color: "#4ade80",
   },
   pathInput: {
     padding: "10px 12px",
