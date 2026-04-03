@@ -8,6 +8,9 @@ if [ -d ".venv/bin" ]; then
     export PATH=".venv/bin:$PATH"
 fi
 
+# Ensure src is importable
+export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}$(pwd)"
+
 # Start Next.js on the public port (serves frontend + API routes)
 cd web && PORT="$PORT" npx next start -p "$PORT" &
 WEB_PID=$!
