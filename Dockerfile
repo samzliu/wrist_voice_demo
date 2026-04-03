@@ -36,11 +36,7 @@ COPY --from=frontend /app/web/node_modules web/node_modules
 COPY --from=frontend /app/web/package.json web/package.json
 COPY --from=frontend /app/web/next.config.ts web/next.config.ts
 
-# Create default workspace
-RUN mkdir -p /app/workspace
-
 ENV PORT=8080
-ENV WRIST_WORKSPACE_DIR=/app/workspace
 EXPOSE 8080
 
 CMD ["./start.sh"]
