@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gstack/
+.DS_Store
+editing/
+web/.next/
+web/node_modules/
+web/out/
+web/tsconfig.tsbuildinfo
