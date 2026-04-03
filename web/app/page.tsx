@@ -68,7 +68,11 @@ export default function Home() {
     >
       <RoomAudioRenderer />
       <AppProvider>
-        <AppShell onRoomConnected={onRoomConnected} mode={configRef.current.mode} />
+        <AppShell
+          onRoomConnected={onRoomConnected}
+          mode={configRef.current.mode}
+          workspacePath={configRef.current.workspace}
+        />
       </AppProvider>
     </LiveKitRoom>
   );
@@ -77,13 +81,19 @@ export default function Home() {
 function AppShell({
   onRoomConnected,
   mode,
+  workspacePath,
 }: {
   onRoomConnected: (room: Room) => void;
   mode: SessionMode;
+  workspacePath: string;
 }) {
   const { dispatch } = useApp();
   const room = useRoomContext();
   const sentConfig = useRef(false);
+
+  useEffect(() => {
+    dispatch({ type: "SET_WORKSPACE_PATH", path: workspacePath });
+  }, [dispatch, workspacePath]);
 
   useEffect(() => {
     const onConnected = () => {

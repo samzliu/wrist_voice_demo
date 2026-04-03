@@ -48,6 +48,7 @@ export interface AppState {
   agentPaused: boolean;
   agentState: "active" | "thinking" | "paused";
   monologue: boolean;
+  workspacePath: string;
   fileList: FileEntry[];
   activeFile: ActiveFile | null;
   reasoningLog: ReasoningEntry[];
@@ -62,6 +63,7 @@ const initialState: AppState = {
   agentPaused: false,
   agentState: "active",
   monologue: false,
+  workspacePath: "",
   fileList: [],
   activeFile: null,
   reasoningLog: [],
@@ -78,6 +80,7 @@ type Action =
   | { type: "SET_PAUSED"; value: boolean }
   | { type: "SET_MONOLOGUE"; value: boolean }
   | { type: "SET_ACTIVE_TAB"; tab: ActiveTab }
+  | { type: "SET_WORKSPACE_PATH"; path: string }
   | { type: "AGENT_MSG"; msg: AgentMessage };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -88,6 +91,8 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, agentPaused: action.value };
     case "SET_MONOLOGUE":
       return { ...state, monologue: action.value };
+    case "SET_WORKSPACE_PATH":
+      return { ...state, workspacePath: action.path };
     case "SET_ACTIVE_TAB":
       return { ...state, activeTab: action.tab };
     case "AGENT_MSG":

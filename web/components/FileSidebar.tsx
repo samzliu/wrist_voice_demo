@@ -110,6 +110,15 @@ export function FileSidebar() {
                 <span style={styles.icon}>{fileIcon(f.type)}</span>
                 <span style={styles.fileName}>{f.name}</span>
                 <div style={styles.actions}>
+                  <a
+                    href={`/api/files?workspace=${encodeURIComponent(state.workspacePath)}&file=${encodeURIComponent(f.name)}`}
+                    download
+                    onClick={(e) => e.stopPropagation()}
+                    style={styles.actionBtn}
+                    title="Download"
+                  >
+                    ↓
+                  </a>
                   <button
                     style={styles.actionBtn}
                     onClick={(e) => {
