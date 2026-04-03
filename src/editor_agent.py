@@ -104,7 +104,7 @@ class MarkdownEditorAgent(Agent):
             msg_type = msg.get("type")
 
             if msg_type == "config":
-                self._handle_config(msg)
+                asyncio.create_task(self._handle_config(msg))
             elif msg_type == "human_edit" and msg.get("content") is not None:
                 file_name = msg.get("file", DEFAULT_FILENAME)
                 path = _resolve_path(self._workspace, file_name)
@@ -138,14 +138,13 @@ class MarkdownEditorAgent(Agent):
         except Exception as e:
             logger.warning("Error handling data message: %s", e)
 
-    def _handle_config(self, msg: dict) -> None:
+    async def _handle_config(self, msg: dict) -> None:
         self._mode = msg.get("mode", "workspace")
         base_prompt = SYSTEM_PROMPT_CHAT if self._mode == "chat" else SYSTEM_PROMPT_WORKSPACE
 
         workspace_path = msg.get("workspace_path", "")
         if self._mode == "workspace":
             if workspace_path:
-                # Local mode: use the provided path
                 new_ws = Path(workspace_path).resolve()
                 new_ws.mkdir(parents=True, exist_ok=True)
                 self._workspace = new_ws
@@ -154,7 +153,6 @@ class MarkdownEditorAgent(Agent):
                     self._file_path.write_text("", encoding="utf-8")
                 logger.info("Workspace set to %s", new_ws)
             else:
-                # Server mode: create a temp workspace for this session
                 tmp = tempfile.mkdtemp(prefix="wrist-session-")
                 self._temp_workspace = tmp
                 self._workspace = Path(tmp)
@@ -175,14 +173,15 @@ class MarkdownEditorAgent(Agent):
             )
         else:
             new_instructions = base_prompt
-        self.update_instructions(new_instructions)
+
+        await self.update_instructions(new_instructions)
         logger.info(
             "Config applied: mode=%s, persona=%s, persona_len=%d",
             self._mode, bool(script_content), len(script_content),
         )
 
         if self._mode == "workspace":
-            asyncio.create_task(self._broadcast_file_list())
+            await self._broadcast_file_list()
 
     def cleanup(self) -> None:
         """Clean up temp workspace on disconnect."""
